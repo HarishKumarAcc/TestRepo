@@ -1,0 +1,164 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>AVAAssetCreateClassXMLFile</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+public class AVAAssetCreateClassXMLFile
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>main</Name>
+				<Source><![CDATA[
+    public static void main(Args _args)
+    {
+        str  _filePath;
+        _filePath = @"AVAUpgradeAutomation\AVAUpgradeAutomation";
+        AVAAssetCreateClassXMLFile::createClassXML(_filePath);
+       // info("XML Created for Table");
+
+        // Creates a class for class extension
+        AvaAssetCreateXMLFile_ClassExtensionClass::createExtensionXML(_filePath);
+        info("Process Completed");
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createClassXML</Name>
+				<Source><![CDATA[
+    static Counter createClassXML(FilePath _filePath)
+    {
+        XMLDocument                         xmlDoc;
+        XMLNode                             nodeRoot, commentNode, nodeXml;
+        str                            xmlFileName;
+        AVAAssetReadObjectTable             assetReadObjectTable;
+        AVAAsseNodePropertyTable            asseNodePropertyTable;
+        XMLNode                             nodeAxClass;
+        
+        // parent tags and child tags with code
+        XMLNode                             nodeClassName, 
+                                            nodeClassSourceCode;
+        XMLNamedNodemap                     nodeMap; 
+        XmlAttribute                        xmlAttribute;
+        counter                             icount;
+       
+        while select assetReadObjectTable
+            where assetReadObjectTable.assetCustomisation == AvaAutoCodeMigratorCustomizationType::NewlyDeveloped
+            && assetReadObjectTable.ObjectType            == UtilElementType::Class
+        {
+            // create XML
+            xmlDoc       = XMLDocument::newBlank();
+            nodeRoot     = xmlDoc.documentElement();
+            nodeAxClass  = xmlDoc.appendChild(xmlDoc.createElement('AxClass'));
+
+            // Add attributes to root
+            NodeMap      = nodeAxClass.attributes();
+            xmlAttribute = xmlDoc.createAttribute("xmlns:i");
+            xmlAttribute.text("http://www.w3.org/2001/XMLSchema-instance");
+            nodeMap.setNamedItem(xmlAttribute);
+
+            nodeClassName = nodeAxClass.appendChild(xmlDoc.createElement('Name'));
+            nodeClassName.text(assetReadObjectTable.ObjectName);
+            
+            // consist of source code from table
+            
+            
+            // Methds creations
+            AVAAssetCreateClassXMLFile::createClassMethods(xmlDoc,
+                                                       nodeAxClass,
+                                                       assetReadObjectTable);
+            str fileNameMethod = @"K:\AosService\PackagesLocalDirectory\"+_filePath+@"\AxClass\"+assetReadObjectTable.ObjectName+".xml";
+            // Generate XML file
+            if (AVAAssetCreateClassXMLFile::createAndSaveXMLFile(xmlDoc, fileNameMethod))
+            {
+                icount++;
+            }
+        }
+        return icount;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createAndSaveXMLFile</Name>
+				<Source><![CDATA[
+    public static boolean createAndSaveXMLFile(XmlDocument _xmlDocu, FileName _fileName)
+    {
+        boolean         trueFalse = false;
+        // make path parameterised
+        new FileIoPermission(_fileName, 'rw').assert();
+        _xmlDocu.save(_fileName);
+        CodeAccessPermission::revertAssert();
+        if (_xmlDocu)
+        {
+            trueFalse = true;
+        }
+        
+        return trueFalse;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createClassMethods</Name>
+				<Source><![CDATA[
+    public static void createClassMethods(XmlDocument             _xmlDoc,
+                                          XMLNode                 _nodeAXTable,
+                                          AVAAssetReadObjectTable _assetReadObjectTable)
+    {
+        AVAAssetReadObjectMetadataClass assetReadObjectMetadataClass;
+        XMLNode                         nodeClassMethods, nodeClassSourceCode,
+                                        nodeClassDeclaration;
+        XmlNode                         nodeclassMethod,
+                                        nodeclassMethodSourceCode,
+                                        nodeCreateCDataSection,
+                                        nodeCreateCDataSectionMethod,
+                                        nodeClassMethodName;
+
+        nodeClassSourceCode     = _nodeAXTable.appendChild(_xmlDoc.createElement('SourceCode'));
+
+        select assetReadObjectMetadataClass
+            where   assetReadObjectMetadataClass.AX2009ParentRefRecId == _assetReadObjectTable.AX2009ParentRefRecId
+                && assetReadObjectMetadataClass.isClassName    == NoYes::Yes;
+        //assetReadObjectMetadataClass.NodeType        == AvaAutoCodeMigratorNodeType::Methods //'Methods' &&
+        // Creating class declation section
+        nodeClassDeclaration    = nodeClassSourceCode.appendChild(_xmlDoc.createElement('Declaration'));
+        nodeCreateCDataSection  = nodeClassDeclaration.appendChild(_xmlDoc.createCDataSection(assetReadObjectMetadataClass.MethodCode));
+
+        nodeClassMethods        = nodeClassSourceCode.appendChild(_xmlDoc.createElement('Methods'));
+
+        // Loop for Methods with sutiable condition
+        Set methodNameSet = new Set(Types::String);
+
+        methodNameSet.add("");
+
+        assetReadObjectMetadataClass.clear();
+        while select assetReadObjectMetadataClass
+            where assetReadObjectMetadataClass.AX2009ParentRefRecId == _assetReadObjectTable.AX2009ParentRefRecId
+                && assetReadObjectMetadataClass.isClassName    == NoYes::No
+        {            
+            if (!methodNameSet.in(assetReadObjectMetadataClass.MethodName))
+            {
+                nodeclassMethod              = null;
+                nodeclassMethodSourceCode    = Null;
+                nodeCreateCDataSectionMethod = Null;
+                nodeClassMethodName          = null;
+
+                nodeclassMethod              = nodeClassMethods.appendChild(_xmlDoc.createElement('Method'));
+                nodeClassMethodName          = nodeclassMethod.appendChild(_xmlDoc.createElement('Name'));
+                nodeClassMethodName.text(assetReadObjectMetadataClass.MethodName); // pass method name from second child table - needed to add new fields which store method name along with code column
+                nodeclassMethodSourceCode    = nodeclassMethod.appendChild(_xmlDoc.createElement('Source'));
+                nodeCreateCDataSectionMethod = nodeclassMethodSourceCode.appendChild(_xmlDoc.createCDataSection(assetReadObjectMetadataClass.MethodCode)); // pass method source from second table
+
+                methodNameSet.add(assetReadObjectMetadataClass.MethodName);
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

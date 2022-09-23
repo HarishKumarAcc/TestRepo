@@ -1,0 +1,2430 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>AVAAssetCreate2012NewExtensionEDTXMLFile</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+class AVAAssetCreate2012NewExtensionEDTXMLFile
+{
+    
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>main</Name>
+				<Source><![CDATA[
+    public static void main(Args _args)
+    {
+        str  _filePath;
+        _filePath = @"AVAUpgradeAutomation\AVAUpgradeAutomation";
+        AVAAssetCreate2012NewExtensionEDTXMLFile::createEDTandEDTExtension(_filePath);
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createEDTandEDTExtension</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// create EDT & EDTExtension
+    /// </summary>
+    /// <param name = "_filePath"></param>
+    public static void createEDTandEDTExtension(FilePath _filePath)
+    {
+        AVAAssetReadObjectTable             assetReadObjectTable;
+        Counter                             newDevelopedEDTCount = 0, extenionEDTCount = 0;
+        VendMemo                            _logValue;
+        AvaAutoCodeLogManagementTable       logTable,logTableLoc,logTableValue;
+        AVALogManagementClass   avaLogManagementClass = new AVALogManagementClass();
+        AvaAutoCodeMigratorObjectName                     objectName;
+
+        //Added for LogMAnagement//
+       // delete_from logTable;
+
+        // Here there are 2 while loop for creating newly developed and Extension EDT.
+        while select assetReadObjectTable
+            where assetReadObjectTable.ObjectType == UtilElementType::ExtendedType
+                && assetReadObjectTable.assetCustomisation == AvaAutoCodeMigratorCustomizationType::NewlyDeveloped
+                //&& assetReadObjectTable.ObjectName == "HSC_Abteilung"
+        {
+            //Added for LogMAnagement//
+            ttsbegin;
+           // select firstonly  logTable ;
+            logTable.clear();
+            logTable.AX2009ParentRefRecId =  assetReadObjectTable.AX2009ParentRefRecId;
+            logTable.ObjectType = assetReadObjectTable.ObjectType;
+            logTable.ObjectName = assetReadObjectTable.ObjectName;
+            logTable.insert();
+            ttscommit;
+
+            if (AVAAssetCreate2012NewExtensionEDTXMLFile::createNewDevelopedEDT(assetReadObjectTable, _filePath))
+            {
+                newDevelopedEDTCount++;
+                select logTableValue where logTableValue.AX2009ParentRefRecId == assetReadObjectTable.AX2009ParentRefRecId;
+                //info(strfmt("%1",logTableValue.LogValue));
+                AVALogManagementClass::UpdateLogManagement(logTableValue.ObjectName,logTableValue.ObjectType,logTableValue.AX2009ParentRefRecId,logTableValue.LogValue);
+            }
+        }
+        
+        while select assetReadObjectTable
+            where assetReadObjectTable.ObjectType == UtilElementType::ExtendedType            
+                && assetReadObjectTable.assetCustomisation != AvaAutoCodeMigratorCustomizationType::NewlyDeveloped // Not newly developed 
+                    && assetReadObjectTable.IsAvailableInD365 == AvaAutoCodeMigratorIsAvailableInD365::Isavailable
+                        && ( assetReadObjectTable.IsModifiedInUsr == NoYes::Yes || assetReadObjectTable.IsModifiedInUsp == NoYes::Yes
+                             || assetReadObjectTable.IsModifiedInCus == NoYes::Yes || assetReadObjectTable.IsModifiedInCup == NoYes::Yes // Object from heigher level, should be modified in any lower layers to create extension of Object
+                             || assetReadObjectTable.IsModifiedInVar == NoYes::Yes || assetReadObjectTable.IsModifiedInVap == NoYes::Yes 
+                            )
+        {
+            //Added for LogMAnagement
+            ttsbegin;
+          //  select firstonly  logTableLoc ;
+            logTableLoc.clear();
+            logTableLoc.AX2009ParentRefRecId =  assetReadObjectTable.AX2009ParentRefRecId;
+            logTableLoc.ObjectType = assetReadObjectTable.ObjectType;
+            logTableLoc.ObjectName = assetReadObjectTable.ObjectName;
+            logTableLoc.insert();
+            ttscommit;
+            if (AVAAssetCreate2012NewExtensionEDTXMLFile::createExtensionEDT(assetReadObjectTable, _filePath))
+            {
+                extenionEDTCount++;
+            }
+        }
+        
+        info(strfmt("%1 New EDT and %2 EDT extenion created", newDevelopedEDTCount, extenionEDTCount));
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createNewDevelopedEDT</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// create new developed EDT
+    /// </summary>
+    /// <param name = "_assetReadObjectTable"></param>
+    /// <param name = "_filePath"></param>
+    /// <returns></returns>
+    public static boolean createNewDevelopedEDT(AVAAssetReadObjectTable _assetReadObjectTable, FilePath _filePath)
+    {
+        XMLDocument                         xmlDoc;
+        XMLNode                             nodeRoot, commentNode, nodeXml, nodeAxEdt, nodeEDTName;
+        FileName                            xmlFileName;
+        XMLNamedNodemap                     nodeMap, nodeMapFields;
+        XmlAttribute                        xmlAttribute, edtXmlAttribute;
+        XMLNode                             nodeArrayElements, nodeRelations, nodeTableReferences;
+        XmlElement                          xmlEdtElement;
+        AVAAssetReadObjectMetadataEDT       assetReadObjectMetadataEDT;
+        boolean                             trueFalse;
+        Notes                               xmlValue;
+        str                                 splitxml,newxml;
+
+        xmlDoc       = XMLDocument::newBlank();
+        nodeRoot     = xmlDoc.documentElement();
+
+        select * from  assetReadObjectMetadataEDT
+            where assetReadObjectMetadataEDT.AX2009ParentRefRecId == _assetReadObjectTable.AX2009ParentRefRecId;
+
+        if (assetReadObjectMetadataEDT)
+        {
+            xmlEdtElement = xmlDoc.createElement('AxEdt');
+
+            xmlAttribute = xmlDoc.createAttribute3('i','type','http://www.w3.org/2001/XMLSchema-instance');
+
+            // 1 setting of Type of object
+            // Due to technical challange we used the below Static/ Dynamics code 
+            if (assetReadObjectMetadataEDT.DataType == "AxEdtInteger")
+            {
+                assetReadObjectMetadataEDT.DataType = "AxEdtInt";
+            }
+            if (assetReadObjectMetadataEDT.DataType == "AxEdtVarString")
+            {
+                assetReadObjectMetadataEDT.DataType = "AxEdtString";
+            }
+            xmlAttribute.value(assetReadObjectMetadataEDT.DataType);
+            //  1
+
+            xmlEdtElement.setAttributeNode(xmlAttribute);
+            nodeAxEdt = xmlDoc.appendChild(xmlEdtElement);
+
+            
+            nodeEDTName = nodeAxEdt.appendChild(xmlDoc.createElement('Name'));
+            nodeEDTName.text(assetReadObjectMetadataEDT.EDTName);
+
+            // set property
+            if (assetReadObjectMetadataEDT.DataType == "AxEdtReal")
+            {
+                // Set of properties are different for EDT real type
+                //AVAAssetCreate2012NewExtensionEDTXMLFile::setRealEDTProperties(xmlDoc,assetReadObjectMetadataEDT, nodeAxEdt);
+                AVAAssetCreate2012NewExtensionEDTXMLFile::setEDTBeforeArrayProperties(xmlDoc,assetReadObjectMetadataEDT, nodeAxEdt,15);
+            }
+            else if (assetReadObjectMetadataEDT.DataType == "AxEdtInt")
+            {
+                // Set of properties are different for EDT string type
+                AVAAssetCreate2012NewExtensionEDTXMLFile::setEDTBeforeArrayProperties(xmlDoc,assetReadObjectMetadataEDT, nodeAxEdt,18);
+            }
+            else if (assetReadObjectMetadataEDT.DataType == "AxEdtString")
+            {
+                // Set of properties are different for EDT string type
+                AVAAssetCreate2012NewExtensionEDTXMLFile::setStringEDTProperties(xmlDoc,assetReadObjectMetadataEDT, nodeAxEdt);
+            }
+            else if (assetReadObjectMetadataEDT.DataType == "AxEdtDate")
+            {
+                AVAAssetCreate2012NewExtensionEDTXMLFile::setEDTBeforeArrayProperties(xmlDoc,assetReadObjectMetadataEDT, nodeAxEdt,18);
+            }
+            else if (assetReadObjectMetadataEDT.DataType == "AxEdtInt64")
+            {
+                AVAAssetCreate2012NewExtensionEDTXMLFile::setEDTBeforeArrayProperties(xmlDoc,assetReadObjectMetadataEDT, nodeAxEdt,19);
+            }
+            else if (assetReadObjectMetadataEDT.DataType == "AxEdtTime")
+            {
+                AVAAssetCreate2012NewExtensionEDTXMLFile::setEDTBeforeArrayProperties(xmlDoc,assetReadObjectMetadataEDT, nodeAxEdt,17);
+            }
+            else if (assetReadObjectMetadataEDT.DataType == "AxEdtUtcDateTime")
+            {
+                AVAAssetCreate2012NewExtensionEDTXMLFile::setEDTBeforeArrayProperties(xmlDoc,assetReadObjectMetadataEDT, nodeAxEdt,18);
+            }
+            else if (assetReadObjectMetadataEDT.DataType == "AxEdtEnum")
+            {
+                AVAAssetCreate2012NewExtensionEDTXMLFile::setEDTBeforeArrayProperties(xmlDoc,assetReadObjectMetadataEDT, nodeAxEdt,18);
+            }
+            else if (assetReadObjectMetadataEDT.DataType == "AxEdtGuid")
+            {
+                AVAAssetCreate2012NewExtensionEDTXMLFile::setEDTBeforeArrayProperties(xmlDoc,assetReadObjectMetadataEDT, nodeAxEdt,18);
+            }
+            else if (assetReadObjectMetadataEDT.DataType == "AxEdtContainer")
+            {
+                AVAAssetCreate2012NewExtensionEDTXMLFile::setEDTBeforeArrayProperties(xmlDoc,assetReadObjectMetadataEDT, nodeAxEdt,18);
+            }
+            
+            /*else if (assetReadObjectMetadataEDT.DataType == "AxEdtDate")
+            {
+                AVAAssetCreate2012NewExtensionEDTXMLFile::setDateEDTProperties(xmlDoc,assetReadObjectMetadataEDT, nodeAxEdt);
+                AVAAssetCreate2012NewExtensionEDTXMLFile::setDateFormatEDTProperties(xmlDoc,assetReadObjectMetadataEDT, nodeAxEdt);
+            }*/
+            else 
+            {
+                //sets properties other than EDT Real type
+                AVAAssetCreate2012NewExtensionEDTXMLFile::setEDTProperties(xmlDoc,assetReadObjectMetadataEDT, nodeAxEdt);
+            }
+            // consist of array elements from EDT
+            AVAAssetCreate2012NewExtensionEDTXMLFile::createArrayElement(xmlDoc,assetReadObjectMetadataEDT, nodeAxEdt);
+
+            // consists of relations from EDT
+            AVAAssetCreate2012NewExtensionEDTXMLFile::createRelation(xmlDoc,assetReadObjectMetadataEDT, nodeAxEdt);
+
+            // consists of TableReference from EDT
+            AVAAssetCreate2012NewExtensionEDTXMLFile::createTableReference(xmlDoc,assetReadObjectMetadataEDT, nodeAxEdt);
+
+            // set property
+            if (assetReadObjectMetadataEDT.DataType == "AxEdtReal")
+            {
+                // Set of properties are different for EDT real type
+                //AVAAssetCreate2012NewExtensionEDTXMLFile::setRealEDTProperties(xmlDoc,assetReadObjectMetadataEDT, nodeAxEdt);
+                AVAAssetCreate2012NewExtensionEDTXMLFile::setEDTAfterArrayElements(xmlDoc,assetReadObjectMetadataEDT, nodeAxEdt,16);
+            }
+            else if (assetReadObjectMetadataEDT.DataType == "AxEdtInt")
+            {
+                // Set of properties are different for EDT string type
+                AVAAssetCreate2012NewExtensionEDTXMLFile::setEDTAfterArrayElements(xmlDoc,assetReadObjectMetadataEDT, nodeAxEdt,19);
+            }
+            else if (assetReadObjectMetadataEDT.DataType == "AxEdtString")
+            {
+                // Set of properties are different for EDT string type
+                AVAAssetCreate2012NewExtensionEDTXMLFile::setStringEDTPropertiesAfter(xmlDoc,assetReadObjectMetadataEDT, nodeAxEdt);
+            }
+            else if (assetReadObjectMetadataEDT.DataType == "AxEdtDate")
+            {
+                AVAAssetCreate2012NewExtensionEDTXMLFile::setEDTAfterArrayElements(xmlDoc,assetReadObjectMetadataEDT, nodeAxEdt,19);
+            }
+            else if (assetReadObjectMetadataEDT.DataType == "AxEdtInt64")
+            {
+                AVAAssetCreate2012NewExtensionEDTXMLFile::setEDTAfterArrayElements(xmlDoc,assetReadObjectMetadataEDT, nodeAxEdt,20);
+            }
+            else if (assetReadObjectMetadataEDT.DataType == "AxEdtTime")
+            {
+                AVAAssetCreate2012NewExtensionEDTXMLFile::setEDTAfterArrayElements(xmlDoc,assetReadObjectMetadataEDT, nodeAxEdt,18);
+            }
+            else if (assetReadObjectMetadataEDT.DataType == "AxEdtUtcDateTime")
+            {
+                AVAAssetCreate2012NewExtensionEDTXMLFile::setEDTAfterArrayElements(xmlDoc,assetReadObjectMetadataEDT, nodeAxEdt,19);
+            }
+            else if (assetReadObjectMetadataEDT.DataType == "AxEdtEnum")
+            {
+                AVAAssetCreate2012NewExtensionEDTXMLFile::setEDTAfterArrayElements(xmlDoc,assetReadObjectMetadataEDT, nodeAxEdt,19);
+            }
+            else if (assetReadObjectMetadataEDT.DataType == "AxEdtGuid")
+            {
+                AVAAssetCreate2012NewExtensionEDTXMLFile::setEDTAfterArrayElements(xmlDoc,assetReadObjectMetadataEDT, nodeAxEdt,19);
+            }
+            else if (assetReadObjectMetadataEDT.DataType == "AxEdtContainer")
+            {
+                AVAAssetCreate2012NewExtensionEDTXMLFile::setEDTAfterArrayElements(xmlDoc,assetReadObjectMetadataEDT, nodeAxEdt,19);
+            }
+
+            xmlValue = xmlDoc.innerXml();
+            splitxml = subStr(xmlValue,0,70);
+            xmlValue = strDel(xmlValue,0,strLen(splitxml));
+            newxml = strReplace(xmlValue,'type=','i:type=');
+            /*if (assetReadObjectMetadataEDT.DataType == "AxEdtEnum")
+            {
+                newxml = strReplace(newxml,'Enumi:type','EnumType');
+            }*/
+            xmlDoc.innerXml(splitxml + newxml);
+            // consists of Table relations from EDT
+
+            //nodeTableReferences = nodeAxEdt.appendChild(xmlDoc.createElement('TableReferences'));
+            FileName fileNameEDT = @"K:\AosService\PackagesLocalDirectory\"+_filePath+@"\AxEdt\"+assetReadObjectMetadataEDT.EDTName+".xml";
+            ;
+            if (AVAAssetCreate2012NewExtensionEDTXMLFile::createAndSaveXMLFile(xmlDoc, fileNameEDT))
+            {
+                trueFalse = true;
+            }
+        }
+        return trueFalse;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createArrayElement</Name>
+				<Source><![CDATA[
+    public static void createArrayElement(XMLDocument                     _xmlDoc,
+                                          AVAAssetReadObjectMetadataEdt   _assetReadObjectMetadataEdt,
+                                          XMLNode                         _nodeedtNameAxedtValues)
+    {
+        XMLNode                        nodeArrayElements,EDTnodeArrayElements,NodeProperties,
+                                       nodeTableReferences,EDTnodeTableReferences,XMLNodeFilterReference,
+                                       XMLNodeFilter,XMLFilterReference,nodeEnumNameEnumValuesAxEnumValuesName,nodeArrayTableReference,nodaArrayRelation;
+        AVAAssetReadObjectMetadataEdt  autoCodeMigratorEDTInfo;
+        AVAAsseNodePropertyTable       assetPropertyTableInfo,assetPropertyTableInfoGrpBy,checkPropertyValue;
+        XmlElement                     xmldesigncontrols;
+        XMLNamedNodemap                nodemapControls;
+        boolean                        isFilter,isIndex,isArrayElement = false;
+        XmlAttribute                   xmlAttribute;
+        XmlAttribute                   xmlAttributcontrols,xmlAttributcontrolsNew;
+        str                            checkProperty,oldxml,newxml,splitxml;
+        Notes                          xmlValue;
+        int                            indexcount;
+        container                      setedtPropertyLoc;
+
+        autoCodeMigratorEDTInfo.clear();
+        autoCodeMigratorEDTInfo.initValue();
+
+        nodeArrayElements = _nodeedtNameAxedtValues.appendChild(_xmlDoc.createElement('ArrayElements'));
+        //EDTnodeArrayElements = nodeArrayElements.appendChild(_xmlDoc.createElement('AxEdtArrayElement'));
+        //nodaArrayRelation = _nodeedtNameAxedtValues.appendChild(_xmlDoc.createElement('Relations'));
+        //nodeArrayTableReference = _nodeedtNameAxedtValues.appendChild(_xmlDoc.createElement('TableReferences'));
+
+        while select autoCodeMigratorEDTInfo
+            order by LineNum asc
+            where autoCodeMigratorEDTInfo.DataType  == "AxEdtArrayElement"
+              &&  autoCodeMigratorEDTInfo.AX2009ParentRefRecId == _assetReadObjectMetadataEdt.AX2009ParentRefRecId
+        {
+            isIndex = false;
+            isArrayElement = true;
+            EDTnodeArrayElements = nodeArrayElements.appendChild(_xmlDoc.createElement('AxEdtArrayElement'));
+
+            while select AX2009MetadataRefRecId,AX2009ParentRefRecId,OriginalPropertyValue,orderNum from  assetPropertyTableInfoGrpBy
+                order by OrderNum asc
+                group by AX2009MetadataRefRecId,AX2009ParentRefRecId,OriginalPropertyValue,OrderNum
+                    where assetPropertyTableInfoGrpBy.AX2009MetadataRefRecId  == autoCodeMigratorEDTInfo.AX2009MetadataRefRecId
+                    && assetPropertyTableInfoGrpBy.AX2009ParentRefRecId       == autoCodeMigratorEDTInfo.AX2009ParentRefRecId
+            {
+                 select assetPropertyTableInfo
+                    order by OrderNum
+                        where assetPropertyTableInfo.OriginalPropertyValue == assetPropertyTableInfoGrpBy.OriginalPropertyValue
+                          &&  assetPropertyTableInfo.AX2009MetadataRefRecId == assetPropertyTableInfoGrpBy.AX2009MetadataRefRecId
+                          &&  assetPropertyTableInfo.AX2009ParentRefRecId   == assetPropertyTableInfoGrpBy.AX2009ParentRefRecId
+                          &&  assetPropertyTableInfo.OrderNum                == assetPropertyTableInfoGrpBy.OrderNum;
+                //{
+                    str edtPropertyLoc;
+                    str edtPropertyValueLoc;
+                    setEdtPropertyLoc = AVAAssetCreate2012NewExtensionEDTXMLFile::splitStrings(assetPropertyTableInfo.ObjectNodeProperty);
+                    edtPropertyLoc = con2Str(conPeek(setEdtPropertyLoc, 1));
+                    edtPropertyValueLoc = con2Str(conPeek(setEdtPropertyLoc, 2));
+
+                    select checkPropertyValue 
+                        where checkPropertyValue.PropertyName == 'Value'
+                          &&  checkPropertyValue.OriginalPropertyValue == assetPropertyTableInfo.OriginalPropertyValue
+                          &&  checkPropertyValue.AX2009MetadataRefRecId == assetPropertyTableInfo.AX2009MetadataRefRecId
+                          &&  checkPropertyValue.AX2009ParentRefRecId   == assetPropertyTableInfo.AX2009ParentRefRecId;
+                    
+                    /*if(checkPropertyValue)
+                    {
+                        if(checkProperty != checkPropertyValue.ChangedPropertyValue)
+                        {
+                            isFilter = true;
+                            checkProperty = checkPropertyValue.ChangedPropertyValue;
+                        }
+
+                        if(isFilter)
+                        {
+                            isFilter = false;
+                            XMLNodeFilterReference = null;
+                            xmldesigncontrols   = _xmlDoc.createElement('AxEdtTableReference');
+                            nodeMapcontrols     = xmldesigncontrols.attributes();
+
+                            xmlAttributcontrols  = _xmlDoc.createAttribute("xmlns");
+                            xmlAttributcontrols.text("");
+                            nodeMapcontrols.setNamedItem(xmlAttributcontrols);
+
+                            xmlAttributcontrolsNew = _xmlDoc.createAttribute("i:type");
+                            xmlAttributcontrolsNew.value("AxEdtTableReferenceFilter");
+                            nodeMapcontrols.setNamedItem(xmlAttributcontrolsNew);
+
+                            XMLFilterReference = nodeTableReferences.appendChild(xmldesigncontrols);
+                            NodeProperties = XMLFilterReference.appendChild(_xmlDoc.createElement(assetPropertyTableInfo.PropertyName));
+                            NodeProperties.text(assetPropertyTableInfo.ChangedPropertyValue);
+                        }*
+                        else
+                        {
+                            NodeProperties = XMLFilterReference.appendChild(_xmlDoc.createElement(assetPropertyTableInfo.PropertyName));
+                            NodeProperties.text(assetPropertyTableInfo.ChangedPropertyValue);
+                        }
+                    }*/
+                    //else
+                    //{
+                        if(edtPropertyLoc == "Name")
+                        {
+                            NodeProperties = EDTnodeArrayElements.appendChild(_xmlDoc.createElement(edtPropertyLoc));
+                            NodeProperties.text(edtPropertyValueLoc);
+                            indexcount++;
+
+                            /*if(!isIndex)
+                            {
+                                isIndex = true;
+                                NodeProperties = EDTnodeArrayElements.appendChild(_xmlDoc.createElement("Index"));
+                                NodeProperties.text(int2Str(indexcount));
+                                NodeProperties = EDTnodeArrayElements.appendChild(_xmlDoc.createElement("Relations"));
+                                nodeTableReferences = EDTnodeArrayElements.appendChild(_xmlDoc.createElement('TableReferences'));
+                                EDTnodeTableReferences = nodeTableReferences.appendChild(_xmlDoc.createElement('AxEdtTableReference'));
+                            }*/
+                        }
+                        else
+                        {
+                            if (edtPropertyLoc == "Help Text")
+                            {
+                                nodeEnumNameEnumValuesAxEnumValuesName = EDTnodeArrayElements.appendChild(_xmlDoc.createElement("HelpText"));
+                                nodeEnumNameEnumValuesAxEnumValuesName.text(edtPropertyValueLoc);// assetPropertyTableInfo.ChangedPropertyValue);
+                            }
+                            else if (edtPropertyLoc == "Collection Label")
+                            {
+                                nodeEnumNameEnumValuesAxEnumValuesName = EDTnodeArrayElements.appendChild(_xmlDoc.createElement("CollectionLabel"));
+                                nodeEnumNameEnumValuesAxEnumValuesName.text(edtPropertyValueLoc);// assetPropertyTableInfo.ChangedPropertyValue);
+                            }
+                            else if (edtPropertyLoc != "RelatedField" && edtPropertyLoc  != "Table" && edtPropertyLoc != "Value")
+                            {
+                                nodeEnumNameEnumValuesAxEnumValuesName = EDTnodeArrayElements.appendChild(_xmlDoc.createElement(edtPropertyLoc));
+                                nodeEnumNameEnumValuesAxEnumValuesName.text(edtPropertyValueLoc);//assetPropertyTableInfo.ChangedPropertyValue);
+                            }
+                            //nodeEnumNameEnumValuesAxEnumValuesName = EDTnodeTableReferences.appendChild(_xmlDoc.createElement(assetPropertyTableInfo.PropertyName));
+                            //nodeEnumNameEnumValuesAxEnumValuesName.text(assetPropertyTableInfo.ChangedPropertyValue);
+                        }
+                    //}
+                //}
+            }
+            if (isArrayElement == true)
+            {
+                nodaArrayRelation = EDTnodeArrayElements.appendChild(_xmlDoc.createElement('Relations'));
+                AVAAssetCreate2012NewExtensionEDTXMLFile::createArrayTableReference(_xmlDoc,autoCodeMigratorEDTInfo, EDTnodeArrayElements);//, nodeArrayTableReference);
+            }
+        }
+        /*if (isArrayElement == true)
+        {
+            nodaArrayRelation = EDTnodeArrayElements.appendChild(_xmlDoc.createElement('Relations'));
+            AVAAssetCreate2012NewExtensionEDTXMLFile::createArrayTableReference(_xmlDoc,_assetReadObjectMetadataEdt, EDTnodeArrayElements);//, nodeArrayTableReference);
+        }*/
+        /*xmlValue = _xmlDoc.innerXml();
+        splitxml = subStr(xmlValue,0,70);
+        xmlValue = strDel(xmlValue,0,strLen(splitxml));
+        newxml = strReplace(xmlValue,'type','i:type');
+        _xmlDoc.innerXml(splitxml + newxml);*/
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createAndSaveXMLFile</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// create & save XML file
+    /// </summary>
+    /// <param name = "_xmlDocu"></param>
+    /// <param name = "_fileName"></param>
+    /// <returns></returns>
+    public static boolean createAndSaveXMLFile(XmlDocument _xmlDocu, FileName _fileName)
+    {
+        boolean         trueFalse = false;
+        new FileIoPermission(_fileName, 'rw').assert();
+        _xmlDocu.save(_fileName);
+        CodeAccessPermission::revertAssert();
+
+        if (_xmlDocu)
+        {
+            trueFalse = true;
+        }
+        return trueFalse;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>splitStrings</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// use to split the objects properties from data stored in this table "AVAAsseNodePropertyTable"
+    /// </summary>
+    /// <param name = "_splitString"></param>
+    /// <returns></returns>
+    public static container splitStrings(AVASplitString _splitString)
+    {
+        container		splitedList;
+        AVASplitString  splitString;
+        list            splitList;
+        ListIterator    splitIterator;
+
+        splitString = strFmt(@"%1",_splitString);
+        splitList = Global::strSplit(splitString,@",");
+        splitIterator = new ListIterator(splitList);
+        while (splitIterator.more())
+        {
+            splitedList += splitIterator.value();
+            splitIterator.next();
+        }
+        return splitedList;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>setEDTProperties</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// set EDT properties
+    /// </summary>
+    /// <param name = "_xmlDoc"></param>
+    /// <param name = "_assetReadObjectMetadataEdt"></param>
+    /// <param name = "_nodeedtNameAxedtValues"></param>
+    public static void setEDTProperties(XMLDocument                     _xmlDoc,
+                                              AVAAssetReadObjectMetadataEdt _assetReadObjectMetadataEdt,
+                                              XMLNode                         _nodeedtNameAxedtValues)
+    {
+        XmlNode                  nodeAxObjectProperty;
+        AVAAsseNodePropertyTable asseNodePropertyTable;
+        container                setedtProperty;
+        Map     edtPropertyMap = new Map(Types::String, Types::String);
+        asseNodePropertyTable.clear();
+        while select asseNodePropertyTable
+            order by OrderNum asc
+            where   asseNodePropertyTable.AX2009MetadataRefRecId  == _assetReadObjectMetadataEdt.AX2009MetadataRefRecId
+                &&  asseNodePropertyTable.AX2009ParentRefRecId    == _assetReadObjectMetadataEdt.AX2009ParentRefRecId
+                &&  asseNodePropertyTable.OrderNum != 0
+        {
+            str edtProperty;
+            str edtPropertyValue;
+
+            setEdtProperty = AVAAssetCreate2012NewExtensionEDTXMLFile::splitStrings(asseNodePropertyTable.ObjectNodeProperty);
+            edtProperty = con2Str(conPeek(setEdtProperty, 1));
+            edtPropertyValue = con2Str(conPeek(setEdtProperty, 2));
+
+            if (edtProperty != '' && edtPropertyValue != '')
+            {
+                edtPropertyMap.insert(edtProperty, edtPropertyValue);
+            }
+        }
+    
+        MapEnumerator traverseMap;
+        traverseMap = new MapEnumerator(edtPropertyMap);
+        while (traverseMap.moveNext())
+        {
+            nodeAxObjectProperty = null;
+            nodeAxObjectProperty = _nodeEdtNameAxEdtValues.appendChild(_xmlDoc.createElement(traverseMap.currentKey()));
+            nodeAxObjectProperty.text(traverseMap.currentValue());
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>setStringEDTPropertiesAfter</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// set real EDT properties
+    /// </summary>
+    /// <param name = "_xmlDoc"></param>
+    /// <param name = "_assetReadObjectMetadataEdt"></param>
+    /// <param name = "_nodeedtNameAxedtValues"></param>
+    public static void setStringEDTPropertiesAfter(XMLDocument                     _xmlDoc,
+                                              AVAAssetReadObjectMetadataEdt _assetReadObjectMetadataEdt,
+                                              XMLNode                         _nodeedtNameAxedtValues)
+    {
+        XmlNode                  nodeAxObjectProperty;
+        AVAAsseNodePropertyTable asseNodePropertyTable,asseNodePropertyTableLoc;
+        container                setedtProperty;
+        Map     edtPropertyMap = new Map(Types::String, Types::String);
+        asseNodePropertyTable.clear();
+        while select asseNodePropertyTable
+            order by ObjectNodeProperty asc
+            where   asseNodePropertyTable.AX2009MetadataRefRecId  == _assetReadObjectMetadataEdt.AX2009MetadataRefRecId
+                &&  asseNodePropertyTable.AX2009ParentRefRecId    == _assetReadObjectMetadataEdt.AX2009ParentRefRecId
+                && (asseNodePropertyTable.PropertyName == "StringSize"
+                || asseNodePropertyTable.PropertyName == "DisplayHeight")
+        {
+            str edtProperty;
+            str edtPropertyValue;
+
+            select asseNodePropertyTableLoc
+            where   asseNodePropertyTableLoc.AX2009MetadataRefRecId  == _assetReadObjectMetadataEdt.AX2009MetadataRefRecId
+                &&  asseNodePropertyTableLoc.AX2009ParentRefRecId    == _assetReadObjectMetadataEdt.AX2009ParentRefRecId
+                && asseNodePropertyTableLoc.ObjectNodeProperty like "Extends*";
+
+            if ((!asseNodePropertyTableLoc && asseNodePropertyTable.PropertyName == "StringSize") || asseNodePropertyTable.PropertyName == "DisplayHeight")
+            {
+                setEdtProperty = AVAAssetCreate2012NewExtensionEDTXMLFile::splitStrings(asseNodePropertyTable.ObjectNodeProperty);
+                edtProperty = con2Str(conPeek(setEdtProperty, 1));
+                edtPropertyValue = con2Str(conPeek(setEdtProperty, 2));
+            }
+
+           
+
+            // Todo Remove if condition
+            if (edtProperty != '' && edtPropertyValue != '' && edtPropertyValue != 'Auto')
+            {
+                if(edtProperty == "StringSize" && edtPropertyValue == "(Memo)")
+                {
+                    edtPropertyValue = "-1";
+                }                
+                else if (edtProperty == "Allownegative")
+                {
+                    edtProperty = "AllowNegative";
+                }
+                else if (edtProperty == "Autoinsseparator")
+                {
+                    edtProperty = "AutoInsSeparator";
+                }
+                else if (edtProperty == "Decimalseparator" && edtPropertyValue == "Comma (")
+                {
+                    edtProperty = "DecimalSeparator";
+                    edtPropertyValue = "Comma";
+                }
+                else if (edtProperty == "Formatmst")
+                {
+                    edtProperty = "FormatMST";
+                }
+                else if (edtProperty == "Noofdecimals")
+                {
+                    edtProperty = "NoOfDecimals";
+                }
+                else if (edtProperty == "Rotatesign")
+                {
+                    edtProperty = "RotateSign";
+                }
+                else if (edtProperty == "Showzero")
+                {
+                    edtProperty = "ShowZero";
+                }
+                else if (edtProperty == "Signdisplay")
+                {
+                    edtProperty = "SignDisplay";
+                }
+                else if (edtProperty == "Thousandseparator" && edtPropertyValue == "Comma (")
+                {
+                    edtProperty = "ThousandSeparator";
+                    edtPropertyValue = "Comma";
+                }
+                else if (edtProperty == "Displaylength")
+                {
+                    edtProperty = "DisplayLength";
+                }
+                else if (edtProperty == "Displayheight")
+                {
+                    edtProperty = "DisplayHeight";
+                }
+                if (edtProperty != '' && edtPropertyValue != '')
+                {
+                    edtPropertyMap.insert(edtProperty, edtPropertyValue);
+                }
+            }
+        }
+    
+        MapEnumerator traverseMap;
+        traverseMap = new MapEnumerator(edtPropertyMap);
+        while (traverseMap.moveNext())
+        {
+            nodeAxObjectProperty = null;
+            nodeAxObjectProperty = _nodeEdtNameAxEdtValues.appendChild(_xmlDoc.createElement(traverseMap.currentKey()));
+            nodeAxObjectProperty.text(traverseMap.currentValue());
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createExtensionEDT</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// create extension EDT
+    /// </summary>
+    /// <param name = "_assetReadObjectTable"></param>
+    /// <param name = "_filePath"></param>
+    /// <returns></returns>
+    public static boolean createExtensionEDT(AVAAssetReadObjectTable _assetReadObjectTable, FilePath _filePath)
+    {
+        XMLDocument                         xmlDoc;
+        XMLNode                             nodeRoot, commentNode, nodeXml, nodeAxEdt, nodeEDTName;
+        FileName                            xmlFileName;
+        XMLNamedNodemap                     nodeMap, nodeMapFields;
+        XmlAttribute                        xmlAttribute, edtXmlAttribute;
+        XMLNode                             nodeArrayElements, nodeRelations, nodeTableReferences;
+        XmlElement                          xmlEdtElement;
+        AVAAssetReadObjectMetadataEDT       assetReadObjectMetadataEDT;
+        boolean                             trueFalse;
+
+        xmlDoc       = XMLDocument::newBlank();
+        nodeRoot     = xmlDoc.documentElement();
+
+        select assetReadObjectMetadataEDT
+                where assetReadObjectMetadataEDT.AX2009ParentRefRecId == _assetReadObjectTable.AX2009ParentRefRecId
+                    && ( assetReadObjectMetadataEDT.ObjectLayer == "usr" || assetReadObjectMetadataEDT.ObjectLayer == "usp" || assetReadObjectMetadataEDT.ObjectLayer == "cus" ||
+                         assetReadObjectMetadataEDT.ObjectLayer == "cup" || assetReadObjectMetadataEDT.ObjectLayer == "var" || assetReadObjectMetadataEDT.ObjectLayer == "vap" );
+            
+        if (assetReadObjectMetadataEDT)
+        {
+            xmlEdtElement = xmlDoc.createElement('AxEdtExtension');
+
+            xmlAttribute = xmlDoc.createAttribute("xmlns:i");
+            xmlAttribute.text("http://www.w3.org/2001/XMLSchema-instance");
+            xmlEdtElement.setAttributeNode(xmlAttribute);
+            nodeAxEdt = xmlDoc.appendChild(xmlEdtElement);
+
+            nodeEDTName = nodeAxEdt.appendChild(xmlDoc.createElement('Name'));
+            nodeEDTName.text(assetReadObjectMetadataEDT.EDTName+".AVAExtension");
+            
+            // consist of array elements from EDT
+            nodeArrayElements     = nodeAxEdt.appendChild(xmlDoc.createElement('ArrayElements'));
+
+            // set property
+            AVAAssetCreate2012NewExtensionEDTXMLFile::setEDTExtensionProperties(xmlDoc,assetReadObjectMetadataEDT, nodeAxEdt);
+            
+            // consists of Table relations from EDT
+            FileName fileNameEDT = @"K:\AosService\PackagesLocalDirectory\"+_filePath+@"\AxEdtExtension\"+assetReadObjectMetadataEDT.EDTName+".AVAExtension.xml";
+            if (AVAAssetCreate2012NewExtensionEDTXMLFile::createAndSaveXMLFile(xmlDoc, fileNameEDT))
+            {
+                trueFalse = true;
+            }
+        }
+        return trueFalse;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>setEDTExtensionProperties</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// set EDT extension properties
+    /// </summary>
+    /// <param name = "_xmlDoc"></param>
+    /// <param name = "_assetReadObjectMetadataEdt"></param>
+    /// <param name = "_nodeedtNameAxedtValues"></param>
+    public static void setEDTExtensionProperties(XMLDocument                     _xmlDoc,
+                                              AVAAssetReadObjectMetadataEdt _assetReadObjectMetadataEdt,
+                                              XMLNode                         _nodeedtNameAxedtValues)
+    {
+        XmlNode                  nodeAxObjectProperty, propertyModification,nodeAxObjectPropertyValue,nodeAxObjectPropertyName,
+                                 axPropertyModification;
+        AVAAsseNodePropertyTable asseNodePropertyTable;
+        container                setEDTExtensionProperty;
+        Map     edtExtensionPropertyMap = new Map(Types::String, Types::String);
+
+        asseNodePropertyTable.clear();
+        //edtExtensionPropertyMap = null;
+        while select asseNodePropertyTable
+            where   asseNodePropertyTable.AX2009MetadataRefRecId  == _assetReadObjectMetadataEdt.AX2009MetadataRefRecId
+                &&  asseNodePropertyTable.AX2009ParentRefRecId    == _assetReadObjectMetadataEdt.AX2009ParentRefRecId
+        {
+            str edtExtensionProperty;
+            str edtExtensionPropertyValue;
+
+            setEDTExtensionProperty = AVAAssetCreate2012NewExtensionEDTXMLFile::splitStrings(asseNodePropertyTable.ObjectNodeProperty);
+            edtExtensionProperty = con2Str(conPeek(setEDTExtensionProperty, 1));
+            edtExtensionPropertyValue = con2Str(conPeek(setEDTExtensionProperty, 2));
+
+            if (edtExtensionProperty != '' && edtExtensionPropertyValue != '')
+            { 
+                //only following property can be changed on Table extension .
+                if (edtExtensionProperty == 'Label' || edtExtensionProperty == 'HelpText' || edtExtensionProperty == 'CountryRegionCodes' || edtExtensionProperty == 'FormHelp' || edtExtensionProperty == 'ShowZero' || edtExtensionProperty == 'DisplayLength' || edtExtensionProperty == 'DisplayHeight')
+                {
+                    edtExtensionPropertyMap.insert(edtExtensionProperty, edtExtensionPropertyValue);
+                }
+            }
+        }
+
+        MapEnumerator traverseMap;
+        traverseMap = new MapEnumerator(edtExtensionPropertyMap);
+        propertyModification = _nodeedtNameAxedtValues.appendChild(_xmlDoc.createElement('PropertyModifications'));
+        while (traverseMap.moveNext())
+        {
+            nodeAxObjectPropertyValue = null;
+            nodeAxObjectPropertyName = null;
+            axPropertyModification = null;
+            axPropertyModification = propertyModification.appendChild(_xmlDoc.createElement('AxPropertyModification'));
+            nodeAxObjectPropertyName = axPropertyModification.appendChild(_xmlDoc.createElement('Name'));
+            nodeAxObjectPropertyName.text(traverseMap.currentKey());
+            nodeAxObjectPropertyValue = axPropertyModification.appendChild(_xmlDoc.createElement('Value'));
+            nodeAxObjectPropertyValue.text(traverseMap.currentValue());
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>setRealEDTProperties</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// set real EDT properties
+    /// </summary>
+    /// <param name = "_xmlDoc"></param>
+    /// <param name = "_assetReadObjectMetadataEdt"></param>
+    /// <param name = "_nodeedtNameAxedtValues"></param>
+    public static void setRealEDTProperties(XMLDocument                     _xmlDoc,
+                                              AVAAssetReadObjectMetadataEdt _assetReadObjectMetadataEdt,
+                                              XMLNode                         _nodeedtNameAxedtValues)
+    {
+        XmlNode                  nodeAxObjectProperty;
+        AVAAsseNodePropertyTable asseNodePropertyTable;
+        container                setedtProperty;
+        Map     edtPropertyMap = new Map(Types::String, Types::String);
+        asseNodePropertyTable.clear();
+        while select asseNodePropertyTable
+            order by orderNum asc
+            where   asseNodePropertyTable.AX2009MetadataRefRecId  == _assetReadObjectMetadataEdt.AX2009MetadataRefRecId
+                &&  asseNodePropertyTable.AX2009ParentRefRecId    == _assetReadObjectMetadataEdt.AX2009ParentRefRecId
+        {
+            str edtProperty;
+            str edtPropertyValue;
+
+            setEdtProperty = AVAAssetCreate2012NewExtensionEDTXMLFile::splitStrings(asseNodePropertyTable.ObjectNodeProperty);
+            edtProperty = con2Str(conPeek(setEdtProperty, 1));
+            edtPropertyValue = con2Str(conPeek(setEdtProperty, 2));
+
+            // Todo Remove if condition
+            if (edtProperty != '' && edtPropertyValue != '')
+            {
+                if(edtProperty == "StringSize" && edtPropertyValue == "(Memo)")
+                {
+                    edtPropertyValue = "-1";
+                }
+                else if (edtProperty == "Allownegative")
+                {
+                    edtProperty = "AllowNegative";
+                }
+                else if (edtProperty == "Autoinsseparator")
+                {
+                    edtProperty = "AutoInsSeparator";
+                }
+                else if (edtProperty == "Decimalseparator")
+                {
+                    edtProperty = "DecimalSeparator";
+                }
+                else if (edtProperty == "Formatmst")
+                {
+                    edtProperty = "FormatMST";
+                }
+                else if (edtProperty == "Noofdecimals")
+                {
+                    edtProperty = "NoOfDecimals";
+                }
+                else if (edtProperty == "Rotatesign")
+                {
+                    edtProperty = "RotateSign";
+                }
+                else if (edtProperty == "Showzero")
+                {
+                    edtProperty = "ShowZero";
+                }
+                else if (edtProperty == "Signdisplay")
+                {
+                    edtProperty = "SignDisplay";
+                }
+                else if (edtProperty == "Thousandseparator")
+                {
+                    edtProperty = "ThousandSeparator";
+                }
+                if (edtProperty != "DisplaceNegative")
+                {
+                    edtPropertyMap.insert(edtProperty, edtPropertyValue);
+                }
+            }
+        }
+    
+        MapEnumerator traverseMap;
+        traverseMap = new MapEnumerator(edtPropertyMap);
+        while (traverseMap.moveNext())
+        {
+            nodeAxObjectProperty = null;
+            nodeAxObjectProperty = _nodeEdtNameAxEdtValues.appendChild(_xmlDoc.createElement(traverseMap.currentKey()));
+            nodeAxObjectProperty.text(traverseMap.currentValue());
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>setStringEDTProperties</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// set real EDT properties
+    /// </summary>
+    /// <param name = "_xmlDoc"></param>
+    /// <param name = "_assetReadObjectMetadataEdt"></param>
+    /// <param name = "_nodeedtNameAxedtValues"></param>
+    public static void setStringEDTProperties(XMLDocument                     _xmlDoc,
+                                              AVAAssetReadObjectMetadataEdt _assetReadObjectMetadataEdt,
+                                              XMLNode                         _nodeedtNameAxedtValues)
+    {
+        XmlNode                  nodeAxObjectProperty;
+        AVAAsseNodePropertyTable asseNodePropertyTable;
+        container                setedtProperty;
+        Map     edtPropertyMap = new Map(Types::String, Types::String);
+        asseNodePropertyTable.clear();
+        while select asseNodePropertyTable
+            order by OrderNum asc
+            where   asseNodePropertyTable.AX2009MetadataRefRecId  == _assetReadObjectMetadataEdt.AX2009MetadataRefRecId
+                &&  asseNodePropertyTable.AX2009ParentRefRecId    == _assetReadObjectMetadataEdt.AX2009ParentRefRecId
+                &&  asseNodePropertyTable.OrderNum != 0
+                && asseNodePropertyTable.PropertyName != "Name"
+                //&& !(asseNodePropertyTable.ObjectNodeProperty like "Presence*")
+                && !(asseNodePropertyTable.ObjectNodeProperty like "StringSize*")
+                 && !(asseNodePropertyTable.ObjectNodeProperty like "DisplayHeight*")
+        {
+            str edtProperty;
+            str edtPropertyValue;
+
+            setEdtProperty = AVAAssetCreate2012NewExtensionEDTXMLFile::splitStrings(asseNodePropertyTable.ObjectNodeProperty);
+            edtProperty = con2Str(conPeek(setEdtProperty, 1));
+            edtPropertyValue = con2Str(conPeek(setEdtProperty, 2));
+
+            // Todo Remove if condition
+            if (edtProperty != '' && edtPropertyValue != '' && edtPropertyValue != 'Auto')
+            {
+                if(edtProperty == "StringSize" && edtPropertyValue == "(Memo)")
+                {
+                    edtPropertyValue = "-1";
+                }
+                else if (edtProperty == "Allownegative")
+                {
+                    edtProperty = "AllowNegative";
+                }
+                else if (edtProperty == "Autoinsseparator")
+                {
+                    edtProperty = "AutoInsSeparator";
+                }
+                else if (edtProperty == "Decimalseparator" && edtPropertyValue == "Comma (")
+                {
+                    edtProperty = "DecimalSeparator";
+                    edtPropertyValue = "Comma";
+                }
+                else if (edtProperty == "Formatmst")
+                {
+                    edtProperty = "FormatMST";
+                }
+                else if (edtProperty == "Noofdecimals")
+                {
+                    edtProperty = "NoOfDecimals";
+                }
+                else if (edtProperty == "Rotatesign")
+                {
+                    edtProperty = "RotateSign";
+                }
+                else if (edtProperty == "Showzero")
+                {
+                    edtProperty = "ShowZero";
+                }
+                else if (edtProperty == "Signdisplay")
+                {
+                    edtProperty = "SignDisplay";
+                }
+                else if (edtProperty == "Thousandseparator" && edtPropertyValue == "Comma (")
+                {
+                    edtProperty = "ThousandSeparator";
+                    edtPropertyValue = "Comma";
+                }
+                else if (edtProperty == "Displaylength")
+                {
+                    edtProperty = "DisplayLength";
+                }
+                if (edtProperty != '' && edtPropertyValue != '')
+                {
+                    edtPropertyMap.insert(edtProperty, edtPropertyValue);
+                }
+            }
+        }
+    
+        MapEnumerator traverseMap;
+        traverseMap = new MapEnumerator(edtPropertyMap);
+        while (traverseMap.moveNext())
+        {
+            nodeAxObjectProperty = null;
+            nodeAxObjectProperty = _nodeEdtNameAxEdtValues.appendChild(_xmlDoc.createElement(traverseMap.currentKey()));
+            nodeAxObjectProperty.text(traverseMap.currentValue());
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>setEDTBeforeArrayProperties</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// set real EDT properties
+    /// </summary>
+    /// <param name = "_xmlDoc"></param>
+    /// <param name = "_assetReadObjectMetadataEdt"></param>
+    /// <param name = "_nodeedtNameAxedtValues"></param>
+    public static void setEDTBeforeArrayProperties(XMLDocument                     _xmlDoc,
+                                                   AVAAssetReadObjectMetadataEdt _assetReadObjectMetadataEdt,
+                                                   XMLNode                         _nodeedtNameAxedtValues,
+                                                   Integer                        _orderNum)
+    {
+        XmlNode                  nodeAxObjectProperty;
+        AVAAsseNodePropertyTable asseNodePropertyTable;
+        container                setedtProperty;
+        Map     edtPropertyMap = new Map(Types::String, Types::String);
+        asseNodePropertyTable.clear();
+        while select asseNodePropertyTable
+            order by OrderNum asc
+            where   asseNodePropertyTable.AX2009MetadataRefRecId  == _assetReadObjectMetadataEdt.AX2009MetadataRefRecId
+                &&  asseNodePropertyTable.AX2009ParentRefRecId    == _assetReadObjectMetadataEdt.AX2009ParentRefRecId
+                &&  asseNodePropertyTable.OrderNum                != 0
+                &&  asseNodePropertyTable.OrderNum                <= _orderNum
+                && asseNodePropertyTable.PropertyName != "Name"
+                //&& !(asseNodePropertyTable.ObjectNodeProperty like "Presence*")
+        {
+            str edtProperty;
+            str edtPropertyValue;
+
+            setEdtProperty = AVAAssetCreate2012NewExtensionEDTXMLFile::splitStrings(asseNodePropertyTable.ObjectNodeProperty);
+            edtProperty = con2Str(conPeek(setEdtProperty, 1));
+            edtPropertyValue = con2Str(conPeek(setEdtProperty, 2));
+
+            // Todo Remove if condition
+            if (edtProperty != '' && edtPropertyValue != '' && edtPropertyValue != 'Auto')
+            {
+                if(edtProperty == "StringSize" && edtPropertyValue == "(Memo)")
+                {
+                    edtPropertyValue = "-1";
+                }
+                else if (edtProperty == "Allownegative")
+                {
+                    edtProperty = "AllowNegative";
+                }
+                else if (edtProperty == "Autoinsseparator")
+                {
+                    edtProperty = "AutoInsSeparator";
+                }
+                else if (edtProperty == "Decimalseparator" && edtPropertyValue == "Comma (")
+                {
+                    edtProperty = "DecimalSeparator";
+                    edtPropertyValue = "Comma";
+                }
+                else if (edtProperty == "Decimalseparator" && edtPropertyValue == "Dot (.)")
+                {
+                    edtProperty = "DecimalSeparator";
+                    edtPropertyValue = "Dot";
+                }
+                else if (edtProperty == "Formatmst")
+                {
+                    edtProperty = "FormatMST";
+                }
+                else if (edtProperty == "Noofdecimals")
+                {
+                    edtProperty = "NoOfDecimals";
+                }
+                else if (edtProperty == "Rotatesign")
+                {
+                    edtProperty = "RotateSign";
+                }
+                else if (edtProperty == "Showzero")
+                {
+                    edtProperty = "ShowZero";
+                }
+                else if (edtProperty == "Signdisplay")
+                {
+                    edtProperty = "SignDisplay";
+                }
+                else if (edtProperty == "Thousandseparator" && edtPropertyValue == "Comma (")
+                {
+                    edtProperty = "ThousandSeparator";
+                    edtPropertyValue = "Comma";
+                }
+                else if (edtProperty == "Thousandseparator" && edtPropertyValue == "Apostrophe (')")
+                {
+                    edtProperty = "ThousandSeparator";
+                    edtPropertyValue = "Apostrophe";
+                }
+                else if (edtProperty == "Thousandseparator" && edtPropertyValue == "Space ( )")
+                {
+                    edtProperty = "ThousandSeparator";
+                    edtPropertyValue = "Space";
+                }
+                else if (edtProperty == "Displaylength")
+                {
+                    edtProperty = "DisplayLength";
+                }
+                else if (edtProperty == "Displayheight")
+                {
+                    edtProperty = "DisplayHeight";
+                }
+                else if (edtProperty == "TimeFormat" && edtPropertyValue == "24-hour")
+                {
+                    edtProperty = "Hour24";
+                }
+                else if (edtProperty == "TimeFormat" && edtPropertyValue == "AM/PM")
+                {
+                    edtProperty = "AMPM";
+                }
+                if ((edtProperty != '' && edtPropertyValue != '') )//&& (edtProperty != 'PresenceIndicatorAllowed' && edtPropertyValue != 'Yes') && (edtProperty != 'ButtonImage' && edtPropertyValue != 'Arrow'))
+                {
+                    edtPropertyMap.insert(edtProperty, edtPropertyValue);
+                }
+            }
+        }
+    
+        MapEnumerator traverseMap;
+        traverseMap = new MapEnumerator(edtPropertyMap);
+        while (traverseMap.moveNext())
+        {
+            nodeAxObjectProperty = null;
+            nodeAxObjectProperty = _nodeEdtNameAxEdtValues.appendChild(_xmlDoc.createElement(traverseMap.currentKey()));
+            nodeAxObjectProperty.text(traverseMap.currentValue());
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>setEDTAfterArrayElements</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// set real EDT properties
+    /// </summary>
+    /// <param name = "_xmlDoc"></param>
+    /// <param name = "_assetReadObjectMetadataEdt"></param>
+    /// <param name = "_nodeedtNameAxedtValues"></param>
+    public static void setEDTAfterArrayElements(XMLDocument                     _xmlDoc,
+                                              AVAAssetReadObjectMetadataEdt _assetReadObjectMetadataEdt,
+                                              XMLNode                         _nodeedtNameAxedtValues,
+                                              Integer                       _orderNum)
+    {
+        XmlNode                  nodeAxObjectProperty;
+        AVAAsseNodePropertyTable asseNodePropertyTable;
+        container                setedtProperty;
+        Map     edtPropertyMap = new Map(Types::String, Types::String);
+        asseNodePropertyTable.clear();
+        while select asseNodePropertyTable
+            order by OrderNum asc
+            where   asseNodePropertyTable.AX2009MetadataRefRecId  == _assetReadObjectMetadataEdt.AX2009MetadataRefRecId
+                &&  asseNodePropertyTable.AX2009ParentRefRecId    == _assetReadObjectMetadataEdt.AX2009ParentRefRecId
+                &&  asseNodePropertyTable.OrderNum                != 0
+                &&  asseNodePropertyTable.OrderNum                >= _orderNum
+                && asseNodePropertyTable.PropertyName != "Name"
+                && !(asseNodePropertyTable.ObjectNodeProperty like "Presence*")
+        {
+            str edtProperty;
+            str edtPropertyValue;
+
+            setEdtProperty = AVAAssetCreate2012NewExtensionEDTXMLFile::splitStrings(asseNodePropertyTable.ObjectNodeProperty);
+            edtProperty = con2Str(conPeek(setEdtProperty, 1));
+            edtPropertyValue = con2Str(conPeek(setEdtProperty, 2));
+
+            // Todo Remove if condition
+            if (edtProperty != '' && edtPropertyValue != '')
+            {
+                if(edtProperty == "StringSize" && edtPropertyValue == "(Memo)")
+                {
+                    edtPropertyValue = "-1";
+                }
+                else if (edtProperty == "Allownegative")
+                {
+                    edtProperty = "AllowNegative";
+                }
+                else if (edtProperty == "Autoinsseparator")
+                {
+                    edtProperty = "AutoInsSeparator";
+                }
+                else if (edtProperty == "Decimalseparator" && edtPropertyValue == "Comma (")
+                {
+                    edtProperty = "DecimalSeparator";
+                    edtPropertyValue = "Comma";
+                }
+                else if (edtProperty == "Formatmst")
+                {
+                    edtProperty = "FormatMST";
+                }
+                else if (edtProperty == "Noofdecimals")
+                {
+                    edtProperty = "NoOfDecimals";
+                }
+                else if (edtProperty == "Rotatesign")
+                {
+                    edtProperty = "RotateSign";
+                }
+                else if (edtProperty == "Showzero")
+                {
+                    edtProperty = "ShowZero";
+                }
+                else if (edtProperty == "Signdisplay")
+                {
+                    edtProperty = "SignDisplay";
+                }
+                else if (edtProperty == "Thousandseparator" && edtPropertyValue == "Comma (")
+                {
+                    edtProperty = "ThousandSeparator";
+                    edtPropertyValue = "Comma";
+                }
+                else if (edtProperty == "Displaylength")
+                {
+                    edtProperty = "DisplayLength";
+                }
+                else if (edtProperty == "Displayheight")
+                {
+                    edtProperty = "DisplayHeight";
+                }
+                else if (edtProperty == "TimeFormat" && edtPropertyValue == "24-hour")
+                {
+                    edtPropertyValue = "Hour24";
+                }
+                else if (edtProperty == "TimeFormat" && edtPropertyValue == "AM/PM")
+                {
+                    edtPropertyValue = "AMPM";
+                }
+                if (edtPropertyValue == "(space).")
+                {
+                    edtPropertyValue = "Space_Dot";
+                }
+                if (edtPropertyValue == ".(space)")
+                {
+                    edtPropertyValue = "Dot_Space";
+                }
+                if (edtPropertyValue == "//")
+                {
+                    edtPropertyValue = "Slash_Slash";
+                }
+                if (edtPropertyValue == "/-")
+                {
+                    edtPropertyValue = "Slash_Dash";
+                }
+                if (edtPropertyValue == "/.")
+                {
+                    edtPropertyValue = "Slash_Dot";
+                }
+                if (edtPropertyValue == "/.")
+                {
+                    edtPropertyValue = "Slash_Dot";
+                }
+                if (edtPropertyValue == "/(Space)")
+                {
+                    edtPropertyValue = "Slash_Space";
+                }
+                if (edtPropertyValue == "/(Space)")
+                {
+                    edtPropertyValue = "Slash_Space";
+                }
+                if (edtPropertyValue == "/(Space)")
+                {
+                    edtPropertyValue = "Slash_Space";
+                }
+                if (edtPropertyValue == "/(none)")
+                {
+                    edtPropertyValue = "Slash_None";
+                }
+                if (edtPropertyValue == "-/")
+                {
+                    edtPropertyValue = "Dash_Slash";
+                }
+                if (edtPropertyValue == "--")
+                {
+                    edtPropertyValue = "Dash_Dash";
+                }
+                if (edtPropertyValue == "-.")
+                {
+                    edtPropertyValue = "Dash_Dot";
+                }
+                if (edtPropertyValue == "-(Space)")
+                {
+                    edtPropertyValue = "Dash_Space";
+                }
+                if (edtPropertyValue == "-(none)")
+                {
+                    edtPropertyValue = "Dash_None";
+                }
+                if (edtPropertyValue == "./")
+                {
+                    edtPropertyValue = "Dot_Slash";
+                }
+                if (edtPropertyValue == ".-")
+                {
+                    edtPropertyValue = "Dot_Dash";
+                }
+                if (edtPropertyValue == "..")
+                {
+                    edtPropertyValue = "Dot_Dot";
+                }
+                if (edtPropertyValue == ".(Space)")
+                {
+                    edtPropertyValue = "Dot_Space";
+                }
+                if (edtPropertyValue == ".(none)")
+                {
+                    edtPropertyValue = "Dot_None";
+                }
+                if (edtPropertyValue == "Dot (.)")
+                {
+                    edtPropertyValue = "Dot";
+                }
+                if (edtPropertyValue == "(Space)/")
+                {
+                    edtPropertyValue = "Space_Slash";
+                }
+                if (edtPropertyValue == "(Space)-")
+                {
+                    edtPropertyValue = "Space_Dash";
+                }
+                if (edtPropertyValue == "(Space)(Space)")
+                {
+                    edtPropertyValue = "Space_Space";
+                }
+                if (edtPropertyValue == "(Space)(none)")
+                {
+                    edtPropertyValue = "Space_None";
+                }
+                if (edtPropertyValue == "(none)/")
+                {
+                    edtPropertyValue = "None_Slash";
+                }
+                if (edtPropertyValue == "(none)-")
+                {
+                    edtPropertyValue = "None_Dash";
+                }
+                if (edtPropertyValue == "(none).")
+                {
+                    edtPropertyValue = "None_Dot";
+                }
+                if (edtPropertyValue == "(none)(Space)")
+                {
+                    edtPropertyValue = "None_Space";
+                }
+                if (edtPropertyValue == "(none)(none)")
+                {
+                    edtPropertyValue = "None_None";
+                }
+                if (edtPropertyValue == "(none)(none)")
+                {
+                    edtPropertyValue = "None_None";
+                }
+                if (edtPropertyValue == "Chinese Formal format")
+                {
+                    edtPropertyValue = "ChineseFormal";
+                }
+                if (edtProperty == "DateDay" && edtPropertyValue ==  "One or two digits")
+                {
+                    edtPropertyValue = "Digits1or2";
+                }
+                if (edtProperty == "DateDay" && edtPropertyValue ==  "Always two digits")
+                {
+                    edtPropertyValue = "Digits2";
+                }
+                if (edtProperty == "DateDay" && edtPropertyValue ==  "Day not shown")
+                {
+                    edtPropertyValue = "None";
+                }
+                if (edtProperty == "DateYear" && edtPropertyValue ==  "Two Digits")
+                {
+                    edtPropertyValue = "Digits2";
+                }
+                if (edtProperty == "DateYear" && edtPropertyValue ==  "Four Digits")
+                {
+                    edtPropertyValue = "Digits4";
+                }
+                if (edtProperty == "DateYear" && edtPropertyValue ==  "Year not shown")
+                {
+                    edtPropertyValue = "None";
+                }
+                if (edtProperty == "DateMonth" && edtPropertyValue ==  "Month not shown")
+                {
+                    edtPropertyValue = "None";
+                }
+                if (edtProperty == "DateMonth" && edtPropertyValue ==  "One or two digits")
+                {
+                    edtPropertyValue = "Digits1or2";
+                }
+                if (edtProperty == "DateMonth" && edtPropertyValue ==  "Always two digits")
+                {
+                    edtPropertyValue = "Digits2";
+                }
+                if (edtProperty == "DateMonth" && edtPropertyValue ==  "Short name (first three letters)")
+                {
+                    edtPropertyValue = "Short";
+                }
+                if (edtProperty == "DateMonth" && edtPropertyValue ==  "Long name")
+                {
+                    edtPropertyValue = "Long";
+                }
+                if (edtProperty == "DateYear")
+                {
+                    edtProperty = "DateYear";
+                }
+                if (edtProperty == "Enumi:type" || edtProperty == "EnumType")
+                {
+                    edtProperty = "EnumType";
+                }
+                if (edtProperty != '' && edtPropertyValue != '' && edtPropertyValue != 'Auto')
+                {
+                    edtPropertyMap.insert(edtProperty, edtPropertyValue);
+                }
+            }
+        }
+    
+        MapEnumerator traverseMap;
+        traverseMap = new MapEnumerator(edtPropertyMap);
+        while (traverseMap.moveNext())
+        {
+            /*if (asseNodePropertyTable.PropertyName == "EnumType")
+            {
+                nodeAxObjectProperty = null;
+                nodeAxObjectProperty = _nodeEdtNameAxEdtValues.appendChild(_xmlDoc.createElement(asseNodePropertyTable.PropertyName));
+                nodeAxObjectProperty.text(traverseMap.currentValue());
+            }*/
+            if (asseNodePropertyTable.PropertyName != "EnumType")
+            
+            {
+                nodeAxObjectProperty = null;
+                nodeAxObjectProperty = _nodeEdtNameAxEdtValues.appendChild(_xmlDoc.createElement(traverseMap.currentKey()));
+                nodeAxObjectProperty.text(traverseMap.currentValue());
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>setDateEDTProperties</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// set EDT properties
+    /// </summary>
+    /// <param name = "_xmlDoc"></param>
+    /// <param name = "_assetReadObjectMetadataEdt"></param>
+    /// <param name = "_nodeedtNameAxedtValues"></param>
+    public static void setDateEDTProperties(XMLDocument                     _xmlDoc,
+                                              AVAAssetReadObjectMetadataEdt _assetReadObjectMetadataEdt,
+                                              XMLNode                         _nodeedtNameAxedtValues)
+    {
+        XmlNode                  nodeAxObjectProperty;
+        AVAAsseNodePropertyTable asseNodePropertyTable;
+        container                setedtProperty;
+        Map     edtPropertyMap = new Map(Types::String, Types::String);
+        asseNodePropertyTable.clear();
+        while select asseNodePropertyTable
+            where   asseNodePropertyTable.AX2009MetadataRefRecId  == _assetReadObjectMetadataEdt.AX2009MetadataRefRecId
+                &&  asseNodePropertyTable.AX2009ParentRefRecId    == _assetReadObjectMetadataEdt.AX2009ParentRefRecId
+                && !(asseNodePropertyTable.ObjectNodeProperty like "Date*")
+                && !(asseNodePropertyTable.ObjectNodeProperty like "Analysis*")
+                && !(asseNodePropertyTable.ObjectNodeProperty like "Name*")
+                && !(asseNodePropertyTable.ObjectNodeProperty like "DisplayLength*")
+                && !(asseNodePropertyTable.ObjectNodeProperty like "Presence*")
+                && !(asseNodePropertyTable.ObjectNodeProperty like "MaxDate*")
+
+        {
+            str edtProperty;
+            str edtPropertyValue;
+
+            setEdtProperty = AVAAssetCreateEnumXMLFile::splitStrings(asseNodePropertyTable.ObjectNodeProperty);
+            edtProperty = con2Str(conPeek(setEdtProperty, 1));
+            edtPropertyValue = con2Str(conPeek(setEdtProperty, 2));
+            if (edtPropertyValue == "(space).")
+            {
+                edtPropertyValue = "Space_Dot";
+            }
+            if (edtPropertyValue == ".(space)")
+            {
+                edtPropertyValue = "Dot_Space";
+            }
+            if (edtPropertyValue == "//")
+            {
+                edtPropertyValue = "Slash_Slash";
+            }
+            if (edtPropertyValue == "/-")
+            {
+                edtPropertyValue = "Slash_Dash";
+            }
+            if (edtPropertyValue == "/.")
+            {
+                edtPropertyValue = "Slash_Dot";
+            }
+            if (edtPropertyValue == "/.")
+            {
+                edtPropertyValue = "Slash_Dot";
+            }
+            if (edtPropertyValue == "/(Space)")
+            {
+                edtPropertyValue = "Slash_Space";
+            }
+            if (edtPropertyValue == "/(Space)")
+            {
+                edtPropertyValue = "Slash_Space";
+            }
+            if (edtPropertyValue == "/(Space)")
+            {
+                edtPropertyValue = "Slash_Space";
+            }
+            if (edtPropertyValue == "/(none)")
+            {
+                edtPropertyValue = "Slash_None";
+            }
+            if (edtPropertyValue == "-/")
+            {
+                edtPropertyValue = "Dash_Slash";
+            }
+            if (edtPropertyValue == "--")
+            {
+                edtPropertyValue = "Dash_Dash";
+            }
+            if (edtPropertyValue == "-.")
+            {
+                edtPropertyValue = "Dash_Dot";
+            }
+            if (edtPropertyValue == "-(Space)")
+            {
+                edtPropertyValue = "Dash_Space";
+            }
+            if (edtPropertyValue == "-(none)")
+            {
+                edtPropertyValue = "Dash_None";
+            }
+            if (edtPropertyValue == "./")
+            {
+                edtPropertyValue = "Dot_Slash";
+            }
+            if (edtPropertyValue == ".-")
+            {
+                edtPropertyValue = "Dot_Dash";
+            }
+            if (edtPropertyValue == "..")
+            {
+                edtPropertyValue = "Dot_Dot";
+            }
+            if (edtPropertyValue == ".(Space)")
+            {
+                edtPropertyValue = "Dot_Space";
+            }
+            if (edtPropertyValue == ".(none)")
+            {
+                edtPropertyValue = "Dot_None";
+            }
+            if (edtPropertyValue == "(Space)/")
+            {
+                edtPropertyValue = "Space_Slash";
+            }
+            if (edtPropertyValue == "(Space)-")
+            {
+                edtPropertyValue = "Space_Dash";
+            }
+            if (edtPropertyValue == "(Space)(Space)")
+            {
+                edtPropertyValue = "Space_Space";
+            }
+            if (edtPropertyValue == "(Space)(none)")
+            {
+                edtPropertyValue = "Space_None";
+            }
+            if (edtPropertyValue == "(none)/")
+            {
+                edtPropertyValue = "None_Slash";
+            }
+            if (edtPropertyValue == "(none)-")
+            {
+                edtPropertyValue = "None_Dash";
+            }
+            if (edtPropertyValue == "(none).")
+            {
+                edtPropertyValue = "None_Dot";
+            }
+            if (edtPropertyValue == "(none)(Space)")
+            {
+                edtPropertyValue = "None_Space";
+            }
+            if (edtPropertyValue == "(none)(none)")
+            {
+                edtPropertyValue = "None_None";
+            }
+            if (edtPropertyValue == "(none)(none)")
+            {
+                edtPropertyValue = "None_None";
+            }
+            if (edtPropertyValue == "Chinese Formal format")
+            {
+                edtPropertyValue = "ChineseFormal";
+            }
+            if (edtProperty == "DateDay" && edtPropertyValue ==  "One or two digits")
+            {
+                edtPropertyValue = "Digits1or2";
+            }
+            if (edtProperty == "DateDay" && edtPropertyValue ==  "Always two digits")
+            {
+                edtPropertyValue = "Digits2";
+            }
+            if (edtProperty == "DateDay" && edtPropertyValue ==  "Day not shown")
+            {
+                edtPropertyValue = "None";
+            }
+            if (edtProperty == "DateYear" && edtPropertyValue ==  "Two Digits")
+            {
+                edtPropertyValue = "Digits2";
+            }
+            if (edtProperty == "DateYear" && edtPropertyValue ==  "Four Digits")
+            {
+                edtPropertyValue = "Digits4";
+            }
+            if (edtProperty == "DateYear" && edtPropertyValue ==  "Year not shown")
+            {
+                edtPropertyValue = "None";
+            }
+            if (edtProperty == "DateMonth" && edtPropertyValue ==  "Month not shown")
+            {
+                edtPropertyValue = "None";
+            }
+            if (edtProperty == "DateMonth" && edtPropertyValue ==  "One or two digits")
+            {
+                edtPropertyValue = "Digits1or2";
+            }
+            if (edtProperty == "DateMonth" && edtPropertyValue ==  "Always two digits")
+            {
+                edtPropertyValue = "Digits2";
+            }
+           
+            if (edtProperty == "DateMonth" && edtPropertyValue ==  "Short name (first three letters)")
+            {
+                edtPropertyValue = "Short";
+            }
+            if (edtProperty == "DateMonth" && edtPropertyValue ==  "Long name")
+            {
+                edtPropertyValue = "Long";
+            }
+            /*if (edtProperty == "DateFormat")
+            {
+                edtProperty = "Date Format";
+            }
+            if (edtProperty == "DateSeparator")
+            {
+                edtProperty = "Date Separator";
+            }*/
+            if (edtProperty == "DateYear")
+            {
+                edtProperty = "DateYear";
+            }
+            /*if (edtProperty == "DateMonth")
+            {
+                edtProperty = "Date Month";
+            }
+            if (edtProperty == "DateDay")
+            {
+                edtProperty = "Date Day";
+            }*/
+
+           
+            if ((edtProperty != '' && edtPropertyValue != '') || (edtProperty != 'ArrayLength') || (edtProperty != 'FormHelp') || (edtProperty != 'Direction' && edtPropertyValue != 'Auto') || (edtProperty != 'PresenceIndicatorAllowed' && edtPropertyValue != 'Yes') || (edtProperty != 'ButtonImage' && edtPropertyValue != 'Arrow'))
+            {
+                edtPropertyMap.insert(edtProperty, edtPropertyValue);
+            }
+        }
+    
+        MapEnumerator traverseMap;
+        traverseMap = new MapEnumerator(edtPropertyMap);
+        while (traverseMap.moveNext())
+        {
+            nodeAxObjectProperty = null;
+            nodeAxObjectProperty = _nodeEdtNameAxEdtValues.appendChild(_xmlDoc.createElement(traverseMap.currentKey()));
+            nodeAxObjectProperty.text(traverseMap.currentValue());
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>setDateFormatEDTProperties</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// set EDT properties
+    /// </summary>
+    /// <param name = "_xmlDoc"></param>
+    /// <param name = "_assetReadObjectMetadataEdt"></param>
+    /// <param name = "_nodeedtNameAxedtValues"></param>
+    public static void setDateFormatEDTProperties(XMLDocument                     _xmlDoc,
+                                              AVAAssetReadObjectMetadataEdt _assetReadObjectMetadataEdt,
+                                              XMLNode                         _nodeedtNameAxedtValues)
+    {
+        XmlNode                  nodeAxObjectProperty;
+        AVAAsseNodePropertyTable asseNodePropertyTable;
+        container                setedtProperty;
+        Map     edtPropertyMap = new Map(Types::String, Types::String);
+        asseNodePropertyTable.clear();
+        while select asseNodePropertyTable
+            where   asseNodePropertyTable.AX2009MetadataRefRecId  == _assetReadObjectMetadataEdt.AX2009MetadataRefRecId
+                &&  asseNodePropertyTable.AX2009ParentRefRecId    == _assetReadObjectMetadataEdt.AX2009ParentRefRecId
+                && asseNodePropertyTable.ObjectNodeProperty like "Date*"
+                //&& asseNodePropertyTable.ObjectNodeProperty like "MaxDate*"
+                
+
+        {
+            str edtProperty;
+            str edtPropertyValue;
+
+            setEdtProperty = AVAAssetCreateEnumXMLFile::splitStrings(asseNodePropertyTable.ObjectNodeProperty);
+            edtProperty = con2Str(conPeek(setEdtProperty, 1));
+            edtPropertyValue = con2Str(conPeek(setEdtProperty, 2));
+            
+            if (edtPropertyValue == "(space).")
+            {
+                edtPropertyValue = "Space_Dot";
+            }
+            if (edtPropertyValue == ".(space)")
+            {
+                edtPropertyValue = "Dot_Space";
+            }
+            if (edtPropertyValue == "//")
+            {
+                edtPropertyValue = "Slash_Slash";
+            }
+            if (edtPropertyValue == "/-")
+            {
+                edtPropertyValue = "Slash_Dash";
+            }
+            if (edtPropertyValue == "/.")
+            {
+                edtPropertyValue = "Slash_Dot";
+            }
+            if (edtPropertyValue == "/.")
+            {
+                edtPropertyValue = "Slash_Dot";
+            }
+            if (edtPropertyValue == "/(Space)")
+            {
+                edtPropertyValue = "Slash_Space";
+            }
+            if (edtPropertyValue == "/(Space)")
+            {
+                edtPropertyValue = "Slash_Space";
+            }
+            if (edtPropertyValue == "/(Space)")
+            {
+                edtPropertyValue = "Slash_Space";
+            }
+            if (edtPropertyValue == "/(none)")
+            {
+                edtPropertyValue = "Slash_None";
+            }
+            if (edtPropertyValue == "-/")
+            {
+                edtPropertyValue = "Dash_Slash";
+            }
+            if (edtPropertyValue == "--")
+            {
+                edtPropertyValue = "Dash_Dash";
+            }
+            if (edtPropertyValue == "-.")
+            {
+                edtPropertyValue = "Dash_Dot";
+            }
+            if (edtPropertyValue == "-(Space)")
+            {
+                edtPropertyValue = "Dash_Space";
+            }
+            if (edtPropertyValue == "-(none)")
+            {
+                edtPropertyValue = "Dash_None";
+            }
+            if (edtPropertyValue == "./")
+            {
+                edtPropertyValue = "Dot_Slash";
+            }
+            if (edtPropertyValue == ".-")
+            {
+                edtPropertyValue = "Dot_Dash";
+            }
+            if (edtPropertyValue == "..")
+            {
+                edtPropertyValue = "Dot_Dot";
+            }
+            if (edtPropertyValue == ".(Space)")
+            {
+                edtPropertyValue = "Dot_Space";
+            }
+            if (edtPropertyValue == ".(none)")
+            {
+                edtPropertyValue = "Dot_None";
+            }
+            if (edtPropertyValue == "(Space)/")
+            {
+                edtPropertyValue = "Space_Slash";
+            }
+            if (edtPropertyValue == "(Space)-")
+            {
+                edtPropertyValue = "Space_Dash";
+            }
+            if (edtPropertyValue == "(Space)(Space)")
+            {
+                edtPropertyValue = "Space_Space";
+            }
+            if (edtPropertyValue == "(Space)(none)")
+            {
+                edtPropertyValue = "Space_None";
+            }
+            if (edtPropertyValue == "(none)/")
+            {
+                edtPropertyValue = "None_Slash";
+            }
+            if (edtPropertyValue == "(none)-")
+            {
+                edtPropertyValue = "None_Dash";
+            }
+            if (edtPropertyValue == "(none).")
+            {
+                edtPropertyValue = "None_Dot";
+            }
+            if (edtPropertyValue == "(none)(Space)")
+            {
+                edtPropertyValue = "None_Space";
+            }
+            if (edtPropertyValue == "(none)(none)")
+            {
+                edtPropertyValue = "None_None";
+            }
+            if (edtPropertyValue == "(none)(none)")
+            {
+                edtPropertyValue = "None_None";
+            }
+            if (edtPropertyValue == "Chinese Formal format")
+            {
+                edtPropertyValue = "ChineseFormal";
+            }
+            if (edtProperty == "DateDay" && edtPropertyValue ==  "One or two digits")
+            {
+                edtPropertyValue = "Digits1or2";
+            }
+            if (edtProperty == "DateDay" && edtPropertyValue ==  "Always two digits")
+            {
+                edtPropertyValue = "Digits2";
+            }
+            if (edtProperty == "DateDay" && edtPropertyValue ==  "Day not shown")
+            {
+                edtPropertyValue = "None";
+            }
+            if (edtProperty == "DateYear" && edtPropertyValue ==  "Two Digits")
+            {
+                edtPropertyValue = "Digits2";
+            }
+            if (edtProperty == "DateYear" && edtPropertyValue ==  "Four Digits")
+            {
+                edtPropertyValue = "Digits4";
+            }
+            if (edtProperty == "DateYear" && edtPropertyValue ==  "Year not shown")
+            {
+                edtPropertyValue = "None";
+            }
+            if (edtProperty == "DateMonth" && edtPropertyValue ==  "Month not shown")
+            {
+                edtPropertyValue = "None";
+            }
+            if (edtProperty == "DateMonth" && edtPropertyValue ==  "One or two digits")
+            {
+                edtPropertyValue = "Digits1or2";
+            }
+            if (edtProperty == "DateMonth" && edtPropertyValue ==  "Always two digits")
+            {
+                edtPropertyValue = "Digits2";
+            }
+           
+            if (edtProperty == "DateMonth" && edtPropertyValue ==  "Short name (first three letters)")
+            {
+                edtPropertyValue = "Short";
+            }
+            if (edtProperty == "DateMonth" && edtPropertyValue ==  "Long name")
+            {
+                edtPropertyValue = "Long";
+            }
+            /*if (edtProperty == "DateFormat")
+            {
+                edtProperty = "Date Format";
+            }
+            if (edtProperty == "DateSeparator")
+            {
+                edtProperty = "Date Separator";
+            }*/
+            if (edtProperty == "DateYear")
+            {
+                edtProperty = "DateYear";
+            }
+            /*if (edtProperty == "DateMonth")
+            {
+                edtProperty = "Date Month";
+            }
+            if (edtProperty == "DateDay")
+            {
+                edtProperty = "Date Day";
+            }*/
+            if (edtProperty != '' && edtPropertyValue != '' && edtProperty != 'ArrayLength' && edtProperty != 'FormHelp')
+            {
+                edtPropertyMap.insert(edtProperty, edtPropertyValue);
+            }
+            info(strfmt("%1,%2",edtProperty,edtPropertyValue));
+        }
+        
+        MapEnumerator traverseMap;
+        traverseMap = new MapEnumerator(edtPropertyMap);
+        while (traverseMap.moveNext())
+        {
+            
+            nodeAxObjectProperty = null;
+            nodeAxObjectProperty = _nodeEdtNameAxEdtValues.appendChild(_xmlDoc.createElement(traverseMap.currentKey()));
+            nodeAxObjectProperty.text(traverseMap.currentValue());
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createRelation</Name>
+				<Source><![CDATA[
+    public static void createRelation(XMLDocument                     _xmlDoc,
+                                          AVAAssetReadObjectMetadataEdt   _assetReadObjectMetadataEdt,
+                                          XMLNode                         _nodeedtNameAxedtValues)
+    {
+        XMLNode                        nodeArrayElements,EDTnodeArrayElements,NodeProperties,
+                                       nodeTableReferences,EDTnodeTableReferences,XMLNodeFilterReference,nodeAllowLoc,
+                                       XMLNodeFilter,XMLFilterReference,nodeEnumNameEnumValuesAxEnumValuesName,nodeArrayTableReference,nodaArrayRelation;
+        AVAAssetReadObjectMetadataEdt  autoCodeMigratorEDTInfo;
+        AVAAsseNodePropertyTable       assetPropertyTableInfo,assetPropertyTableInfoGrpBy,checkPropertyValue,assetPropertyTableInfoLoc;
+        XmlElement                     xmldesigncontrols;
+        XMLNamedNodemap                nodemapControls;
+        boolean                        isFilter,isIndex;
+        XmlAttribute                   xmlAttribute;
+        XmlAttribute                   xmlAttributcontrols,xmlAttributcontrolsNew;
+        str                            checkProperty,oldxml,newxml,splitxml;
+        Notes                          xmlValue;
+        int                            indexcount;
+        container                      setedtPropertyLoc;
+        AVAAssetReadObjectTable        assetReadObjectTable;
+        str                            exception;
+        int                            countRelation;
+        VendMemo                       logValueLocal;
+        AvaAutoCodeLogManagementTable  logTable;
+        str                            origPropValue,origPropValueLoc;
+        RefRecId                       metaDataRecId;
+        LineNum                        lineNum;
+
+        autoCodeMigratorEDTInfo.clear();
+        autoCodeMigratorEDTInfo.initValue();
+
+        nodeArrayElements = _nodeedtNameAxedtValues.appendChild(_xmlDoc.createElement('Relations'));
+        //EDTnodeArrayElements = nodeArrayElements.appendChild(_xmlDoc.createElement('AxEdtRelation'));
+       
+        countRelation = 0;
+        while select autoCodeMigratorEDTInfo
+            order by LineNum asc
+            where autoCodeMigratorEDTInfo.DataType  == "AxEdtRelation"
+              &&  autoCodeMigratorEDTInfo.AX2009ParentRefRecId == _assetReadObjectMetadataEdt.AX2009ParentRefRecId
+        {
+            isIndex = false;
+            lineNum = 0;
+            /*while select assetPropertyTableInfoLoc
+                order by LineNum asc
+                where assetPropertyTableInfoLoc.AX2009MetadataRefRecId == autoCodeMigratorEDTInfo.AX2009MetadataRefRecId
+                && assetPropertyTableInfoLoc.AX2009ParentRefRecId      == autoCodeMigratorEDTInfo.AX2009ParentRefRecId
+            {
+                origPropValueLoc += assetPropertyTableInfoLoc.OriginalPropertyValue;
+                if (origPropValue == origPropValueLoc)
+                {
+                    lineNum = assetPropertyTableInfoLoc.LineNum;
+                    lineNum++;
+                    break;
+                }
+            }
+            origPropValueLoc = "";
+            origPropValue    = "";
+
+            if (!lineNum)
+            {
+                select firstonly assetPropertyTableInfoLoc
+                    order by LineNum asc
+                    where assetPropertyTableInfoLoc.AX2009MetadataRefRecId == autoCodeMigratorEDTInfo.AX2009MetadataRefRecId;
+                lineNum = assetPropertyTableInfoLoc.LineNum;
+            */
+            //if (countRelation == 0)
+            {
+            //EDTnodeArrayElements = nodeArrayElements.appendChild(_xmlDoc.createElement('AxEdtRelation'));
+            while select AX2009MetadataRefRecId,AX2009ParentRefRecId,OriginalPropertyValue,PropertyName from  assetPropertyTableInfoGrpBy
+                order by PropertyName asc
+                group by AX2009MetadataRefRecId,AX2009ParentRefRecId,OriginalPropertyValue,PropertyName
+                    where assetPropertyTableInfoGrpBy.AX2009MetadataRefRecId  == autoCodeMigratorEDTInfo.AX2009MetadataRefRecId
+                    && assetPropertyTableInfoGrpBy.AX2009ParentRefRecId       == autoCodeMigratorEDTInfo.AX2009ParentRefRecId
+                    //&& assetPropertyTableInfoGrpBy.LineNum                    >= lineNum
+            {
+                select assetPropertyTableInfo
+                    order by PropertyName
+                        where assetPropertyTableInfo.OriginalPropertyValue == assetPropertyTableInfoGrpBy.OriginalPropertyValue
+                          &&  assetPropertyTableInfo.AX2009MetadataRefRecId == assetPropertyTableInfoGrpBy.AX2009MetadataRefRecId
+                          &&  assetPropertyTableInfo.PropertyName           == assetPropertyTableInfoGrpBy.PropertyName;
+                //{
+                str edtPropertyLoc;
+                str edtPropertyValueLoc;
+                setEdtPropertyLoc = AVAAssetCreate2012NewExtensionEDTXMLFile::splitStrings(assetPropertyTableInfo.ObjectNodeProperty);
+                edtPropertyLoc = con2Str(conPeek(setEdtPropertyLoc, 1));
+                edtPropertyValueLoc = con2Str(conPeek(setEdtPropertyLoc, 2));
+                    
+                origPropValue += assetPropertyTableInfo.OriginalPropertyValue;
+                select checkPropertyValue
+                         where checkPropertyValue.PropertyName == 'Value'
+                          //where  checkPropertyValue.OriginalPropertyValue == assetPropertyTableInfo.OriginalPropertyValue
+                          &&  checkPropertyValue.AX2009MetadataRefRecId == assetPropertyTableInfo.AX2009MetadataRefRecId
+                          &&  checkPropertyValue.AX2009ParentRefRecId   == assetPropertyTableInfo.AX2009ParentRefRecId;
+                    
+                if(checkPropertyValue.PropertyName == "Value")
+                    {
+                        if(checkProperty != checkPropertyValue.OriginalPropertyValue)
+                        {
+                            isFilter = true;
+                            checkProperty = checkPropertyValue.OriginalPropertyValue;
+                        }
+
+                        if(isFilter)
+                        {
+                            isFilter = false;
+                            XMLNodeFilterReference = null;
+                            //xmldesigncontrols   = _xmlDoc.createElement('AxEdtTableReference');
+                            xmldesigncontrols   = _xmlDoc.createElement('AxEdtRelation');
+                            nodeMapcontrols     = xmldesigncontrols.attributes();
+
+                            xmlAttributcontrols  = _xmlDoc.createAttribute("xmlns");
+                            xmlAttributcontrols.text("");
+                            nodeMapcontrols.setNamedItem(xmlAttributcontrols);
+
+                            xmlAttributcontrolsNew = _xmlDoc.createAttribute("i:type");
+                            xmlAttributcontrolsNew.value("AxEdtRelationFixed");
+                            nodeMapcontrols.setNamedItem(xmlAttributcontrolsNew);
+
+                            XMLFilterReference = nodeArrayElements.appendChild(xmldesigncontrols);
+                            if(edtPropertyLoc == "RelatedField")
+                            {
+                                NodeProperties = XMLFilterReference.appendChild(_xmlDoc.createElement(edtPropertyLoc));
+                                NodeProperties.text(edtPropertyValueLoc);//assetPropertyTableInfo.ChangedPropertyValue);
+                           
+                            }
+                            
+                            
+                        }
+                        else if (edtPropertyLoc == "Table")
+                        {
+                            NodeProperties = XMLFilterReference.appendChild(_xmlDoc.createElement(edtPropertyLoc));
+                            NodeProperties.text(edtPropertyValueLoc);//assetPropertyTableInfo.ChangedPropertyValue);
+                            
+                        }
+                        else if (edtPropertyLoc == "Value")
+                        {
+                            NodeProperties = XMLFilterReference.appendChild(_xmlDoc.createElement(edtPropertyLoc));
+                            NodeProperties.text(edtPropertyValueLoc);
+                        }
+                        /*else
+                        {
+                            NodeProperties = XMLFilterReference.appendChild(_xmlDoc.createElement(assetPropertyTableInfo.PropertyName));
+                            NodeProperties.text(assetPropertyTableInfo.ChangedPropertyValue);
+                        }*/
+                    }
+                /*if (checkPropertyValue.PropertyName == 'Value')
+                {
+                    select assetReadObjectTable
+                        where assetReadObjectTable.AX2009ParentRefRecId == _assetReadObjectMetadataEdt.AX2009ParentRefRecId;
+                    //exception = "Related field fixed relation has been deprecated in D365";
+                    logValueLocal = "\nRelated field fixed relation has been deprecated in D365" + "/" + "EDT" + "/" + strFmt("%1",assetReadObjectTable.ObjectName)+"/"+"Relation"+"/"+strFmt("%1",autoCodeMigratorEDTInfo.EDTName);
+                    ttsbegin;
+                    select forupdate logTable where logTable.AX2009ParentRefRecId == assetReadObjectTable.AX2009ParentRefRecId;
+                        //&& logTable.LogValue != logValueLocal;
+                    if (logTable)
+                    {
+                        logTable.LogValue += logValueLocal;
+                        logTable.update();
+                    }
+                    ttscommit;
+                    
+                    //AVALogManagementClass::UpdateLogManagement(assetReadObjectTable.ObjectName,assetReadObjectTable.ObjectType,assetReadObjectTable.AX2009ParentRefRecId,exception);
+                }*/
+                //else
+                if (!checkPropertyValue)
+                {
+                    countRelation++;
+                     if(edtPropertyLoc == "RelatedField")
+                    {
+                        EDTnodeArrayElements = nodeArrayElements.appendChild(_xmlDoc.createElement('AxEdtRelation'));
+                        NodeProperties = EDTnodeArrayElements.appendChild(_xmlDoc.createElement(edtPropertyLoc));
+                        NodeProperties.text(edtPropertyValueLoc);//assetPropertyTableInfo.ChangedPropertyValue);
+                           
+                    }
+                            
+                    else if (edtPropertyLoc == "Table")
+                    {
+                        nodeEnumNameEnumValuesAxEnumValuesName = EDTnodeArrayElements.appendChild(_xmlDoc.createElement(edtPropertyLoc));
+                        nodeEnumNameEnumValuesAxEnumValuesName.text(edtPropertyValueLoc);//assetPropertyTableInfo.ChangedPropertyValue);
+                            
+                    }
+
+                    /*else if (edtPropertyLoc == "Value")
+                    {
+                        nodeEnumNameEnumValuesAxEnumValuesName = EDTnodeArrayElements.appendChild(_xmlDoc.createElement(edtPropertyLoc));
+                        nodeEnumNameEnumValuesAxEnumValuesName.text(edtPropertyValueLoc);//assetPropertyTableInfo.ChangedPropertyValue);
+                    }*/
+                        
+                            
+                }
+                }
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createTableReference</Name>
+				<Source><![CDATA[
+    public static void createTableReference(XMLDocument                     _xmlDoc,
+                                                 AVAAssetReadObjectMetadataEdt   _assetReadObjectMetadataEdt,
+                                                 //XMLNode                         _nodeRelationArray,
+                                                 XMLNode                         _nodeArrayTableReference)
+    {
+        XMLNode                        nodeArrayElements,EDTnodeArrayElements,NodeProperties,
+                                       nodeTableReferences,EDTnodeTableReferences,XMLNodeFilterReference,
+                                       XMLNodeFilter,XMLFilterReference,nodeEnumNameEnumValuesAxEnumValuesName,nodeArrayTableReference,nodaArrayRelation;
+        AVAAssetReadObjectMetadataEdt  autoCodeMigratorEDTInfo;
+        AVAAsseNodePropertyTable       assetPropertyTableInfo,assetPropertyTableInfoGrpBy,checkPropertyValue;
+        XmlElement                     xmldesigncontrols;
+        XMLNamedNodemap                nodemapControls;
+        boolean                        isFilter,isIndex;
+        XmlAttribute                   xmlAttribute;
+        XmlAttribute                   xmlAttributcontrols,xmlAttributcontrolsNew;
+        str                            checkProperty,oldxml,newxml,splitxml;
+        Notes                          xmlValue;
+        container                      setEdtPropertyContainer;
+        Integer                        first,orderNum;
+        str                            orgPropertyValue,orgPropertyValueLoc;
+
+        autoCodeMigratorEDTInfo.clear();
+        autoCodeMigratorEDTInfo.initValue();
+        
+        nodeArrayElements = _nodeArrayTableReference.appendChild(_xmlDoc.createElement('TableReferences'));
+        while select autoCodeMigratorEDTInfo
+            order by LineNum asc
+            where autoCodeMigratorEDTInfo.DataType  == "AxEdtTableReferences"
+              &&  autoCodeMigratorEDTInfo.AX2009ParentRefRecId == _assetReadObjectMetadataEdt.AX2009ParentRefRecId
+        {
+            isIndex = false;
+
+            while select AX2009MetadataRefRecId,AX2009ParentRefRecId,OriginalPropertyValue,PropertyName from  assetPropertyTableInfoGrpBy
+                order by OriginalPropertyValue asc
+                //group by AX2009MetadataRefRecId,AX2009ParentRefRecId,OriginalPropertyValue,PropertyName
+                    where assetPropertyTableInfoGrpBy.AX2009MetadataRefRecId  == autoCodeMigratorEDTInfo.AX2009MetadataRefRecId
+                    && assetPropertyTableInfoGrpBy.AX2009ParentRefRecId       == autoCodeMigratorEDTInfo.AX2009ParentRefRecId
+            {
+                if (assetPropertyTableInfoGrpBy.OriginalPropertyValue != orgPropertyValueLoc)
+                {
+                    orderNum = 1;
+                }
+                else
+                {
+                    orderNum++;
+                }
+                if (first == 0)
+                {
+                    orderNum = 1;
+                }
+                first++;
+
+                orgPropertyValueLoc = assetPropertyTableInfoGrpBy.OriginalPropertyValue;
+
+                 select assetPropertyTableInfo
+                    order by OrderNum
+                        where assetPropertyTableInfo.OriginalPropertyValue  == assetPropertyTableInfoGrpBy.OriginalPropertyValue
+                          &&  assetPropertyTableInfo.AX2009MetadataRefRecId == assetPropertyTableInfoGrpBy.AX2009MetadataRefRecId
+                          &&  assetPropertyTableInfo.AX2009ParentRefRecId   == assetPropertyTableInfoGrpBy.AX2009ParentRefRecId
+                           && assetPropertyTableInfo.OrderNum == orderNum;
+                //{
+                    str edtPropertyTR;
+                    str edtPropertyValueTR;
+                    setEdtPropertyContainer = AVAAssetCreate2012NewExtensionEDTXMLFile::splitStrings(assetPropertyTableInfo.ObjectNodeProperty);
+                    edtPropertyTR = con2Str(conPeek(setEdtPropertyContainer, 1));
+                    edtPropertyValueTR = con2Str(conPeek(setEdtPropertyContainer, 2));
+
+                    select checkPropertyValue
+                        where checkPropertyValue.PropertyName == 'Value'
+                          &&  checkPropertyValue.OriginalPropertyValue == assetPropertyTableInfo.OriginalPropertyValue
+                          &&  checkPropertyValue.AX2009MetadataRefRecId == assetPropertyTableInfo.AX2009MetadataRefRecId
+                          &&  checkPropertyValue.AX2009ParentRefRecId   == assetPropertyTableInfo.AX2009ParentRefRecId;
+                
+                 if(checkPropertyValue.PropertyName == "Value")
+                    {
+                        if(checkProperty != checkPropertyValue.OriginalPropertyValue)//ChangedPropertyValue)
+                        {
+                            isFilter = true;
+                            checkProperty = checkPropertyValue.OriginalPropertyValue;//ChangedPropertyValue;
+                        }
+
+                        if(isFilter)
+                        {
+                            isFilter = false;
+                            XMLNodeFilterReference = null;
+                            xmldesigncontrols   = _xmlDoc.createElement('AxEdtTableReference');
+                            nodeMapcontrols     = xmldesigncontrols.attributes();
+
+                            xmlAttributcontrols  = _xmlDoc.createAttribute("xmlns");
+                            xmlAttributcontrols.text("");
+                            nodeMapcontrols.setNamedItem(xmlAttributcontrols);
+
+                            xmlAttributcontrolsNew = _xmlDoc.createAttribute("i:type");
+                            xmlAttributcontrolsNew.value("AxEdtTableReferenceFilter");
+                            nodeMapcontrols.setNamedItem(xmlAttributcontrolsNew);
+
+                            XMLFilterReference = nodeArrayElements.appendChild(xmldesigncontrols);
+                           if(edtPropertyTR == "RelatedField")
+                            {
+                                NodeProperties = XMLFilterReference.appendChild(_xmlDoc.createElement(edtPropertyTR));
+                                NodeProperties.text(edtPropertyValueTR);//assetPropertyTableInfo.ChangedPropertyValue);
+                           
+                            }
+                        }
+                        else if (edtPropertyTR == "Table")
+                        {
+                            NodeProperties = XMLFilterReference.appendChild(_xmlDoc.createElement(edtPropertyTR));
+                            NodeProperties.text(edtPropertyValueTR);//assetPropertyTableInfo.ChangedPropertyValue);
+                            
+                        }
+                        else if (edtPropertyTR == "Value")
+                        {
+                            NodeProperties = XMLFilterReference.appendChild(_xmlDoc.createElement(edtPropertyTR));
+                            NodeProperties.text(edtPropertyValueTR);
+                        }
+                        /*else
+                        {
+                            NodeProperties = XMLFilterReference.appendChild(_xmlDoc.createElement(edtPropertyTR));
+                            NodeProperties.text(edtPropertyValueTR);
+                        }*/
+                    }
+                    //else
+                    if (!checkPropertyValue)
+                    {
+
+                        if(edtPropertyTR == "RelatedField")
+                        {
+                            EDTnodeTableReferences = nodeArrayElements.appendChild(_xmlDoc.createElement('AxEdtTableReference'));
+                            NodeProperties = EDTnodeTableReferences.appendChild(_xmlDoc.createElement(edtPropertyTR)); 
+                            NodeProperties.text(edtPropertyValueTR);//assetPropertyTableInfo.ChangedPropertyValue);
+                           
+                        }
+                            
+                        else if (edtPropertyTR == "Table")
+                        {
+                            nodeEnumNameEnumValuesAxEnumValuesName = EDTnodeTableReferences.appendChild(_xmlDoc.createElement(edtPropertyTR));
+                            nodeEnumNameEnumValuesAxEnumValuesName.text(edtPropertyValueTR);//assetPropertyTableInfo.ChangedPropertyValue);
+                            
+                        }
+                        /*if(!isIndex)
+                        {
+                            isIndex = true;
+                            EDTnodeTableReferences = nodeArrayElements.appendChild(_xmlDoc.createElement('AxEdtTableReference'));
+                            nodeEnumNameEnumValuesAxEnumValuesName = EDTnodeTableReferences.appendChild(_xmlDoc.createElement(edtPropertyTR));
+                            nodeEnumNameEnumValuesAxEnumValuesName.text(edtPropertyValueTR);
+                        }
+                        else
+                        {
+                            nodeEnumNameEnumValuesAxEnumValuesName = EDTnodeTableReferences.appendChild(_xmlDoc.createElement(edtPropertyTR));
+                            nodeEnumNameEnumValuesAxEnumValuesName.text(edtPropertyValueTR);
+                        }*/
+                    }
+                //}
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createArrayTableReference</Name>
+				<Source><![CDATA[
+    public static void createArrayTableReference(XMLDocument                     _xmlDoc,
+                                                 AVAAssetReadObjectMetadataEdt   _assetReadObjectMetadataEdt,
+                                                 //XMLNode                         _nodeRelationArray,
+                                                 XMLNode                         _nodeArrayTableReference)
+    {
+        XMLNode                        nodeArrayElements,EDTnodeArrayElements,NodeProperties,
+                                       nodeTableReferences,EDTnodeTableReferences,XMLNodeFilterReference,
+                                       XMLNodeFilter,XMLFilterReference,nodeEnumNameEnumValuesAxEnumValuesName,nodeArrayTableReference,nodaArrayRelation;
+        AVAAssetReadObjectMetadataEdt  autoCodeMigratorEDTInfo;
+        AVAAsseNodePropertyTable       assetPropertyTableInfo,assetPropertyTableInfoGrpBy,checkPropertyValue;
+        XmlElement                     xmldesigncontrols;
+        XMLNamedNodemap                nodemapControls;
+        boolean                        isFilter,isIndex;
+        XmlAttribute                   xmlAttribute;
+        XmlAttribute                   xmlAttributcontrols,xmlAttributcontrolsNew;
+        str                            checkProperty,oldxml,newxml,splitxml;
+        Notes                          xmlValue;
+        container                      setEdtPropertyLoc;
+        Integer                        orderNum,first;
+        str                            orgPropertyValue,orgPropertyValueLoc;
+
+        autoCodeMigratorEDTInfo.clear();
+        autoCodeMigratorEDTInfo.initValue();
+
+        nodeArrayElements = _nodeArrayTableReference.appendChild(_xmlDoc.createElement('TableReferences'));
+        first = 0;
+        orderNum = 0;
+        while select autoCodeMigratorEDTInfo
+            order by LineNum asc
+            where autoCodeMigratorEDTInfo.DataType  == "AxEdtArrayElement"
+              &&  autoCodeMigratorEDTInfo.AX2009ParentRefRecId == _assetReadObjectMetadataEdt.AX2009ParentRefRecId
+              &&  autoCodeMigratorEDTInfo.AX2009MetadataRefRecId == _assetReadObjectMetadataEdt.AX2009MetadataRefRecId
+              
+        {
+            isIndex = false;
+
+            while select AX2009MetadataRefRecId,AX2009ParentRefRecId,OriginalPropertyValue,PropertyName,OrderNum from  assetPropertyTableInfoGrpBy
+                order by OriginalPropertyValue asc
+                //group by AX2009MetadataRefRecId,AX2009ParentRefRecId,OriginalPropertyValue,PropertyName,OrderNum
+                    where assetPropertyTableInfoGrpBy.AX2009MetadataRefRecId  == autoCodeMigratorEDTInfo.AX2009MetadataRefRecId
+                    && assetPropertyTableInfoGrpBy.AX2009ParentRefRecId       == autoCodeMigratorEDTInfo.AX2009ParentRefRecId
+                    && (assetPropertyTableInfoGrpBy.PropertyName == "RelatedField" || assetPropertyTableInfoGrpBy.PropertyName == "Table" || assetPropertyTableInfoGrpBy.PropertyName == "Value")
+                    
+
+            {
+                if (assetPropertyTableInfoGrpBy.PropertyName != "Name")
+                {
+                if (assetPropertyTableInfoGrpBy.OriginalPropertyValue != orgPropertyValueLoc)
+                {
+                    orderNum = 1;
+                }
+                else 
+                {
+                    orderNum++;
+                }
+                if (first == 0)
+                {
+                    orderNum = 1;
+                }
+                first++;
+                select assetPropertyTableInfo
+                    //order by PropertyName 
+                         where assetPropertyTableInfo.OriginalPropertyValue  == assetPropertyTableInfoGrpBy.OriginalPropertyValue
+                          &&  assetPropertyTableInfo.AX2009MetadataRefRecId == assetPropertyTableInfoGrpBy.AX2009MetadataRefRecId
+                          &&  assetPropertyTableInfo.AX2009ParentRefRecId   == assetPropertyTableInfoGrpBy.AX2009ParentRefRecId
+                          //&& assetPropertyTableInfo.PropertyName            == assetPropertyTableInfoGrpBy.PropertyName
+                          && assetPropertyTableInfo.OrderNum                == orderNum
+                          && assetPropertyTableInfo.PropertyName != "Name";
+                orgPropertyValueLoc = assetPropertyTableInfoGrpBy.OriginalPropertyValue;
+                //{
+                    str edtPropertyLoc;
+                    str edtPropertyValueLoc;
+                    setEdtPropertyLoc = AVAAssetCreate2012NewExtensionEDTXMLFile::splitStrings(assetPropertyTableInfo.ObjectNodeProperty);
+                    edtPropertyLoc = con2Str(conPeek(setEdtPropertyLoc, 1));
+                    edtPropertyValueLoc = con2Str(conPeek(setEdtPropertyLoc, 2));
+
+                    select checkPropertyValue
+                        where checkPropertyValue.PropertyName == 'Value'
+                          &&  checkPropertyValue.OriginalPropertyValue == assetPropertyTableInfo.OriginalPropertyValue
+                          &&  checkPropertyValue.AX2009MetadataRefRecId == assetPropertyTableInfo.AX2009MetadataRefRecId
+                          &&  checkPropertyValue.AX2009ParentRefRecId   == assetPropertyTableInfo.AX2009ParentRefRecId;
+                    
+                    if(checkPropertyValue.PropertyName == "Value")
+                    {
+                        if(checkProperty != checkPropertyValue.OriginalPropertyValue)
+                        {
+                            isFilter = true;
+                            checkProperty = checkPropertyValue.OriginalPropertyValue;
+                        }
+
+                        if(isFilter)
+                        {
+                            isFilter = false;
+                            XMLNodeFilterReference = null;
+                            xmldesigncontrols   = _xmlDoc.createElement('AxEdtTableReference');
+                            nodeMapcontrols     = xmldesigncontrols.attributes();
+
+                            xmlAttributcontrols  = _xmlDoc.createAttribute("xmlns");
+                            xmlAttributcontrols.text("");
+                            nodeMapcontrols.setNamedItem(xmlAttributcontrols);
+
+                            xmlAttributcontrolsNew = _xmlDoc.createAttribute("i:type");
+                            xmlAttributcontrolsNew.value("AxEdtTableReferenceFilter");
+                            nodeMapcontrols.setNamedItem(xmlAttributcontrolsNew);
+
+                            XMLFilterReference = nodeArrayElements.appendChild(xmldesigncontrols);
+                            if(edtPropertyLoc == "RelatedField")
+                            {
+                                NodeProperties = XMLFilterReference.appendChild(_xmlDoc.createElement(edtPropertyLoc));
+                                NodeProperties.text(edtPropertyValueLoc);//assetPropertyTableInfo.ChangedPropertyValue);
+                           
+                            }
+                        }
+                        else if (edtPropertyLoc == "Table")
+                        {
+                            NodeProperties = XMLFilterReference.appendChild(_xmlDoc.createElement(edtPropertyLoc));
+                            NodeProperties.text(edtPropertyValueLoc);//assetPropertyTableInfo.ChangedPropertyValue);
+                            
+                        }
+                        else if (edtPropertyLoc == "Value")
+                        {
+                            NodeProperties = XMLFilterReference.appendChild(_xmlDoc.createElement(edtPropertyLoc));
+                            NodeProperties.text(edtPropertyValueLoc);
+                        }
+                        /*else
+                        {
+                            NodeProperties = XMLFilterReference.appendChild(_xmlDoc.createElement(edtPropertyLoc));
+                            NodeProperties.text(edtPropertyValueLoc);
+                        }*/
+                    }
+                    //else if (edtPropertyLoc != "" && edtPropertyValueLoc != "")
+                    if (!checkPropertyValue)
+                    {
+                        if(edtPropertyLoc == "RelatedField")
+                        {
+                            EDTnodeTableReferences = nodeArrayElements.appendChild(_xmlDoc.createElement('AxEdtTableReference'));
+                            NodeProperties = EDTnodeTableReferences.appendChild(_xmlDoc.createElement(edtPropertyLoc));
+                            NodeProperties.text(edtPropertyValueLoc);//assetPropertyTableInfo.ChangedPropertyValue);
+                           
+                        }
+                            
+                        else if (edtPropertyLoc == "Table")
+                        {
+                            nodeEnumNameEnumValuesAxEnumValuesName = EDTnodeTableReferences.appendChild(_xmlDoc.createElement(edtPropertyLoc));
+                            nodeEnumNameEnumValuesAxEnumValuesName.text(edtPropertyValueLoc);//assetPropertyTableInfo.ChangedPropertyValue);
+                            
+                        }
+                        /*if(!isIndex || edtPropertyLoc == "RelatedField")
+                        {
+                            isIndex = true;
+                            EDTnodeTableReferences = nodeArrayElements.appendChild(_xmlDoc.createElement('AxEdtTableReference'));
+                        nodeEnumNameEnumValuesAxEnumValuesName = EDTnodeTableReferences.appendChild(_xmlDoc.createElement(edtPropertyLoc));
+                            nodeEnumNameEnumValuesAxEnumValuesName.text(edtPropertyValueLoc);
+                        }
+                        else
+                        {
+                            nodeEnumNameEnumValuesAxEnumValuesName = EDTnodeTableReferences.appendChild(_xmlDoc.createElement(edtPropertyLoc));
+                            nodeEnumNameEnumValuesAxEnumValuesName.text(edtPropertyValueLoc);
+                        }*/
+                    }
+                //}
+            }
+            }
+        }
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>

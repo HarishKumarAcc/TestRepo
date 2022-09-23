@@ -1,0 +1,195 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AxClass xmlns:i="http://www.w3.org/2001/XMLSchema-instance">
+	<Name>AVAAssetCreateConfigurationKeyXMLFile</Name>
+	<SourceCode>
+		<Declaration><![CDATA[
+/// <summary>
+///  Create ConfigurationKey for ax 2012 and ax 2009
+/// </summary>
+class AVAAssetCreateConfigurationKeyXMLFile
+{
+}
+]]></Declaration>
+		<Methods>
+			<Method>
+				<Name>main</Name>
+				<Source><![CDATA[
+    public static void main(Args _args)
+    {
+        counter         totalObjectsCreated;
+        totalObjectsCreated = AVAAssetCreateConfigurationKeyXMLFile::createConfigurationKey("AVAUpgradeObject\\AVAUpgradeObject");
+        info(strfmt(" %1 Configuration key's are Created",totalObjectsCreated));
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createConfigurationKey</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// create configuration key
+    /// </summary>
+    /// <param name = "_filePath"></param>
+    /// <returns></returns>
+    static Counter createConfigurationKey(FilePath _filePath)
+    {
+        XMLDocument                         xmlDoc;
+        XMLNode                             nodeRoot, nodeConfigurationKey, nodeConfigurationKeyName;
+        FileName                            xmlFileName;
+        XmlAttribute                        xmlAttribute, XmlAttributeV1;
+        XmlElement                          xmlConfigurationKeyElement;
+        FileName                            fileNameAction;
+        AVAAssetReadObjectTable             assetReadObjectTable;
+        AVAAssetReadObjectMetaDataConfigurationKey assetReadObjectMetaDataConfigurationKey;
+        counter                             icount;
+
+        //loops for parent table and pics the configuration records
+        while select assetReadObjectTable
+            where assetReadObjectTable.ObjectType == UtilElementType::ConfigurationKey
+                && assetReadObjectTable.assetCustomisation == AvaAutoCodeMigratorCustomizationType::NewlyDeveloped
+        {
+            xmlDoc       = XMLDocument::newBlank();
+            nodeRoot     = xmlDoc.documentElement();
+
+            // creates a object type tag in XML
+            xmlConfigurationKeyElement = xmlDoc.createElement('AxConfigurationKey');
+
+            // sets the attribute for validation of object structure which is predefined at below url
+            xmlAttribute = xmldoc.createAttribute2('i','http://www.w3.org/2001/XMLSchema-instance');
+            //xmlAttribute.value('Microsoft.Dynamics.AX.Metadata.V1');
+        
+            xmlConfigurationKeyElement.setAttributeNode(xmlAttribute);
+
+            nodeConfigurationKey = xmlDoc.appendChild(xmlConfigurationKeyElement);
+
+            // sets the object names on to XML tag
+            nodeConfigurationKeyName = nodeConfigurationKey.appendChild(xmlDoc.createElement('Name'));
+            nodeConfigurationKeyName.text(assetReadObjectTable.ObjectName);
+
+            // set properties for Configuratinon
+            //select assetReadObjectMetaDataConfigurationKey
+             //   where assetReadObjectMetaDataConfigurationKey.AX2009ParentRefRecId == assetReadObjectTable.AX2009ParentRefRecId;
+         //   {
+               // AVAAssetCreateConfigurationKeyXMLFile::setConfigurationProperties(xmlDoc,assetReadObjectMetaDataConfigurationKey, nodeConfigurationKey);
+               AVAAssetCreateConfigurationKeyXMLFile::setConfigurationProperties(xmlDoc,assetReadObjectTable, nodeConfigurationKey);
+          //  }
+            fileNameAction = @"K:\AosService\PackagesLocalDirectory\"+_filePath+@"\AxConfigurationKey\"+assetReadObjectTable.ObjectName+".xml";
+                
+            // return the true if objects creates objects in D365 VS or XML file on local folder
+            if (AVAAssetCreateConfigurationKeyXMLFile::createAndSaveXMLFile(xmlDoc, fileNameAction))
+            {
+                icount++;
+            }
+        }
+        return icount;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>createAndSaveXMLFile</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// use to split the objects properties from data stored in this table "AVAAsseNodePropertyTable"
+    /// </summary>
+    /// <param name = "_xmlDocu"></param>
+    /// <param name = "_fileName"></param>
+    /// <returns></returns>
+    public static boolean createAndSaveXMLFile(XmlDocument _xmlDocu, FileName _fileName)
+    {
+        boolean         trueFalse = false;
+       
+        new FileIoPermission(_fileName, 'rw').assert();
+        _xmlDocu.save(_fileName);
+        CodeAccessPermission::revertAssert();
+        if (_xmlDocu)
+        {
+            trueFalse = true;
+        }
+        return trueFalse;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>splitStrings</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// 
+    /// </summary>
+    /// <param name = "_splitString"></param>
+    /// <returns></returns>
+    public static container splitStrings(AVASplitString _splitString)
+    {
+        container		splitedList;
+        AVASplitString  splitString;
+        list            splitList;
+        ListIterator    splitIterator;
+
+        splitString     = strFmt(@"%1",_splitString);
+        splitList       = Global::strSplit(splitString,@",");
+        splitIterator   = new ListIterator(splitList);
+        while (splitIterator.more())
+        {
+            splitedList += splitIterator.value();
+            splitIterator.next();
+        }
+        return splitedList;
+    }
+
+]]></Source>
+			</Method>
+			<Method>
+				<Name>setConfigurationProperties</Name>
+				<Source><![CDATA[
+    /// <summary>
+    /// set configuration properties
+    /// </summary>
+    /// <param name = "_xmlDoc"></param>
+    /// <param name = "_assetReadObjectMetaDataConfigurationKey"></param>
+    /// <param name = "_nodeConfigurationKey"></param>
+    public static void setConfigurationProperties(XMLDocument                     _xmlDoc,
+                                                    AVAAssetReadObjectTable _assetReadObjectTable,
+                                                    XMLNode                         _nodeConfigurationKey
+                                                    )
+    {
+        XmlNode                  nodeAxObjectProperty;
+        AVAAsseNodePropertyTable asseNodePropertyTable;
+        container                setEnumProperty;
+        Map     enumPropertyMap = new Map(Types::String, Types::String);
+        while select asseNodePropertyTable order by OrderNum asc 
+           // where asseNodePropertyTable.AX2009MetadataRefRecId == _assetReadObjectMetaDataConfigurationKey.AX2009MetadataRefRecId
+           where asseNodePropertyTable.AX2009ParentRefRecId == _assetReadObjectTable.AX2009ParentRefRecId
+        {
+            str enumProperty;
+            str enumPropertyValue;
+
+            setEnumProperty     = AVAAssetCreateEnumXMLFile::splitStrings(asseNodePropertyTable.ObjectNodeProperty);
+            enumProperty        = con2Str(conPeek(setEnumProperty, 1));
+            enumPropertyValue   = con2Str(conPeek(setEnumProperty, 2));
+
+            if (enumProperty != '' && enumPropertyValue != '')
+            {
+               // enumPropertyMap.insert(enumProperty, enumPropertyValue);
+                nodeAxObjectProperty = null;
+                nodeAxObjectProperty = _nodeConfigurationKey.appendChild(_xmlDoc.createElement(enumProperty));
+                nodeAxObjectProperty.text(enumPropertyValue);
+
+            }
+        }
+    
+        //MapEnumerator traverseMap;
+        //traverseMap = new MapEnumerator(enumPropertyMap);
+        //while (traverseMap.moveNext())
+        //{
+        //    nodeAxObjectProperty = null;
+        //    nodeAxObjectProperty = _nodeConfigurationKey.appendChild(_xmlDoc.createElement(traverseMap.currentKey()));
+        //    nodeAxObjectProperty.text(traverseMap.currentValue());
+        //}
+    }
+
+]]></Source>
+			</Method>
+		</Methods>
+	</SourceCode>
+</AxClass>
